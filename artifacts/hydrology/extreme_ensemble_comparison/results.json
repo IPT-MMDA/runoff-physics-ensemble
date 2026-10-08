@@ -1,0 +1,40 @@
+{
+  "comparison": {
+    "approaches": [
+      "stacking"
+    ],
+    "batch_size": 64,
+    "complex_epochs": 150,
+    "complex_kind": "pinnmamba",
+    "complexity_percentile": 80.0,
+    "consolidation_epochs": 150,
+    "consolidation_weight": 0.0,
+    "distillation_epochs": 150,
+    "epochs": 150,
+    "gate_temperature": 0.15,
+    "hard_inference": false,
+    "include_baselines": true,
+    "inference_noise": 0.25,
+    "learning_rate": 0.001,
+    "ood_quantile": 0.99,
+    "ood_shrinkage": 0.1,
+    "routing": "morse",
+    "seeds": [
+      0
+    ],
+    "simple_kind": "rbf",
+    "threshold_quantile": 0.95,
+    "training_noise": 0.0
+  },
+  "data": {
+    "basin": "2011",
+    "csv": null,
+    "data_root": "/mnt/c/Users/micro/Downloads/camels_ch/camels_ch",
+    "end": "2020-12-31",
+    "include_landcover": true,
+    "sequence_length": 30,
+    "source": "camels_ch",
+    "start": "2000-01-01"
+  },
+  "device": "cuda"
+}

@@ -1,0 +1,39 @@
+1. Find the paper on using encoder-decoder architecture or smth like that to model the extreme events (extreme events
+have high error on encode-decoder architectures, naturally); can we do a similar thing, but using the memory or other
+components from Mamba/s4/hayena? As mamba and s4 are quite similar to RNNs and LSTMs, where there experiments on using
+these architectures and not encoders/decoders for such a task?
+
+
+mamba_reconstruction_question.txt
+
+
+2. Is there a natural, scientifically rigorous and well-known way of connecting the rainfall-runoff task to the extreme
+events prediction / classification?
+
+Yes
+
+2.1. What are common Extreme Events that are predicted with rainfall-runoff, aside from flood? Are there
+papers where there's not only natural impact assessment but also economical with respect to rainfall-runoff?
+
+ee_types_runoff.txt
+
+2.2. In the current rainfall-runoff set-up, what do we lack to turn the pipeline into extreme events prediction flow?
+What would be the cleanest and simplest, shortest path to this?
+
+We can make a simple q96 statistical prediction test.
+
+2.3. What are some extreme events datasets we can use in order achieve this?
+
+
+
+3. What do we know about intermittency and PINNs and NDEs as well as Universal Diff equations with neural components? 
+And also those, which include SSMs as their components? Same question but for chaotic properties and fractal ones.
+
+
+
+4. Do we care about fractality when it comes to Extreme events prediction?
+
+
+
+5. Are fractional differential equations used for extreme events predictions?
+ 

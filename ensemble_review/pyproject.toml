@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "complexity-ensemble"
+version = "0.1.0"
+description = "Morse-routed heterogeneous ensembles for PINNs and neural differential equations"
+requires-python = ">=3.10"
+dependencies = ["matplotlib", "numpy", "torch", "gradio>=6,<7", "plotly", "pandas", "geopandas"]
+
+[project.scripts]
+complexity-ensemble-app = "complexity_ensemble.app:main"
+complexity-ensemble-run = "complexity_ensemble.regional_cli:main"
+
+[tool.setuptools.package-data]
+complexity_ensemble = ["design/*.css"]
+
+[tool.setuptools.packages.find]
+include = ["complexity_ensemble*"]
+
+[project.optional-dependencies]
+animations = ["Pillow"]
+tda = ["ripser>=0.6"]
+kan = ["pykan>=0.2.8"]
+dev = ["pytest"]

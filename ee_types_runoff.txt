@@ -1,0 +1,176 @@
+Yes. Aside from floods, the most common extreme predicted from rainfall–runoff modeling is hydrological drought or extreme low flow. Several other hazards use rainfall–runoff as the hydrological backbone, but require an additional impact model.
+
+| Event or impact | Rainfall–runoff contribution | Additional model/data needed |
+|---|---|---|
+| Hydrological drought/low flow | Predicts discharge deficit, onset, duration, minimum flow and recovery | Low-flow threshold, water demand or ecological requirements |
+| Reservoir-inflow shortage | Predicts unusually low inflow and failure to refill | Reservoir storage/operation model |
+| Hydropower drought | Predicts insufficient inflow or hydraulic head | Turbine model, reservoir rules, electricity prices |
+| Debris flow and erosion | Predicts runoff or critical channel discharge that mobilizes sediment | Terrain, sediment availability and erosion/geomorphic model |
+| Combined sewer overflow | Predicts urban runoff exceeding drainage/treatment capacity | Sewer-network and treatment-capacity model |
+| Water-quality pulses | Predicts runoff transporting sediment, nutrients, pathogens or contaminants | Pollutant loading and water-quality model |
+| Ecological low-flow event | Predicts habitat disconnection or flows below environmental requirements | Ecological response or habitat model |
+| Dam spill/overtopping | Predicts extreme reservoir inflow | Reservoir routing, operating rules and structural limits |
+
+### Hydrological drought is the strongest non-flood connection
+
+A streamflow-drought event can be defined as
+
+\[
+Q_t < u_{\mathrm{low}},
+\]
+
+where \(u_{\mathrm{low}}\) is a site-specific threshold from the flow-duration curve, an environmental-flow requirement, or a water-supply threshold. An event is then characterized by:
+
+- Onset and recovery time
+- Duration below the threshold
+- Minimum discharge
+- Cumulative deficit volume
+- Spatial extent across multiple basins
+
+This is a mature research area. For example, [Fundel et al.](https://hess.copernicus.org/articles/17/395/2013/) passed ensemble weather forecasts through the PREVAH hydrological model and forecast streamflow drought duration, severity and magnitude. They found useful drought skill over a one-month horizon. A later study showed that the exact drought definition materially affects forecast results and converted LISFLOOD discharge trajectories into discrete drought events: [Streamflow drought: implication of drought definitions and its application for drought forecasting](https://hess.copernicus.org/articles/25/3991/2021/).
+
+A complication is that drought involves longer hydrological memory than many floods. Some conventional rainfall–runoff models do not reproduce multiyear storage depletion particularly well, as shown during Australia’s Millennium Drought in [Fowler et al.](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2019WR025286). This is potentially an interesting use case for S4 or Mamba, provided the training windows and state handling genuinely preserve multi-season or multiyear memory.
+
+### Other meaningful event classes
+
+Runoff-generated debris flows are a well-established coupled application. A rainfall–runoff model estimates whether runoff reaches the critical discharge required to mobilize channel material; geomorphic information then determines whether debris is available. This [Journal of Hydrology study](https://doi.org/10.1016/j.jhydrol.2018.01.021) found that a coupled runoff/debris-flow framework had better predictive skill than simple rainfall thresholds.
+
+Combined sewer overflow is another natural classification task:
+
+\[
+Y_t=\mathbf 1\{\text{runoff or sewer flow}>\text{system capacity}\}.
+\]
+
+Research has estimated CSO occurrence, response time, duration and overflow depth from rainfall–runoff behavior, including this [Tokyo study](https://doi.org/10.1061/%28ASCE%29WR.1943-5452.0000972). The economic consequences include treatment costs, regulatory penalties, recreational closures and public-health damage.
+
+Water-quality extremes are related but require more than discharge. High runoff can mobilize sediment, nutrients, pathogens and agricultural contaminants, while extreme low flow can produce high concentrations because of weak dilution. A large review found frequent water-quality deterioration during droughts, heatwaves, rainstorms and floods, but also emphasized competing mobilization and dilution mechanisms: [Global river water quality under climate change and hydroclimatic extremes](https://www.nature.com/articles/s43017-023-00472-3).
+
+## Economic assessment
+
+There is a substantial literature here. The relevant search terms are:
+
+- **Hydro-economic modeling**
+- **Forecast economic value**
+- **Cost–loss analysis**
+- **Expected annual damage**
+- **Decision-centric hydrological forecasting**
+
+Two conceptually different questions are studied.
+
+### 1. Economic risk or damage
+
+The standard modeling chain is
+
+\[
+\text{weather}
+\rightarrow
+\text{runoff}
+\rightarrow
+\text{hazard intensity}
+\rightarrow
+\text{exposure}
+\rightarrow
+\text{damage}.
+\]
+
+If \(L(q)\) is the monetary loss associated with discharge \(q\), the expected loss is
+
+\[
+E[L]=\int L(q)\,dF_Q(q).
+\]
+
+For long-term flood risk, integrating damage over annual exceedance probabilities produces expected annual damage, or EAD.
+
+Examples include:
+
+- [A high-resolution large-scale flood hazard and economic risk model for property insurance in Japan](https://doi.org/10.1111/jfr3.12117) couples a distributed rainfall–runoff/inundation model to building vulnerability functions and insured-property losses.
+
+- [A comparative flood damage and risk assessment of land-use changes](https://nhess.copernicus.org/articles/22/395/2022/) couples rainfall–runoff simulation with spatial damage modeling. It estimates how afforestation or land sealing changes monetary flood risk.
+
+- [Projecting Changes in Expected Annual Damages From Riverine Flooding in the United States](https://pmc.ncbi.nlm.nih.gov/articles/PMC6549715/) estimates asset losses over multiple flood frequencies rather than considering only the nominal 100-year flood.
+
+These are generally scenario or risk-assessment models, rather than real-time loss forecasts.
+
+### 2. Economic value of a forecast
+
+Here the question is not “How much damage can the event cause?” but:
+
+> How much money can be saved or earned by making decisions using this forecast?
+
+Formally,
+
+\[
+V =
+E[C(a_{\mathrm{baseline}},Y)]
+-
+E[C(a_{\mathrm{forecast}},Y)],
+\]
+
+where \(a\) denotes the chosen action and \(C\) its realized cost. This is usually evaluated against climatology, persistence, or a no-forecast operating policy.
+
+Examples include:
+
+- [The monetary benefit of early flood warnings in Europe](https://doi.org/10.1016/j.envsci.2015.04.016) estimated avoided damages associated with EFAS warnings and reported a potential benefit–cost ratio of approximately 400:1. The authors also found that damage and damage-reduction assumptions were major uncertainty sources.
+
+- [The Value of Subseasonal Hydrometeorological Forecasts to Hydropower Operations](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2019WR025280) passed forecasts into a reservoir-operation optimization model. Perfect forecasts increased mean revenue by about 5.76% relative to climatology, while statistically preprocessed forecasts captured more than half of that potential benefit.
+
+- [Impact of hydrological forecast quality on reservoir management and revenue](https://hess.copernicus.org/articles/25/1033/2021/) connects seven-day inflow forecast errors to hydropower revenue, spill volume, storage and generation decisions. Forecast biases generated economic losses on the order of millions of euros in its conceptual systems.
+
+- [Seasonal forecasts offer economic benefit for hydrological decision making](https://www.nature.com/articles/s41598-021-89564-y) evaluates drought-related early action in semi-arid basins and reports substantial potential savings, including avoidable reservoir-operation losses in a Sudan case study.
+
+### Drought and agricultural economics
+
+The established framework is called a coupled hydro-economic model:
+
+\[
+\text{rainfall/runoff and storage}
+\leftrightarrow
+\text{water allocation}
+\rightarrow
+\text{crop production and economic decisions}.
+\]
+
+A particularly relevant example is [A spatially distributed hydroeconomic model to assess drought effects on land use, farm profits and agricultural employment](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2008WR007534). It couples a physically based hydrological model to an agricultural production and farmer-decision model, allowing farms to respond to water scarcity by changing irrigation, groundwater pumping and crop allocation.
+
+Another example, [A probabilistic risk assessment of the national economic impacts of regulatory drought management](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2018EF001092), estimates agricultural losses from water-abstraction restrictions under present and future hydrological conditions.
+
+### Best research direction for your Mamba/S4 idea
+
+The cleanest non-flood project would probably be:
+
+\[
+\text{Mamba/S4 rainfall–runoff model}
+\rightarrow
+\text{probabilistic low-flow forecast}
+\rightarrow
+\text{drought event and deficit volume}
+\rightarrow
+\text{reservoir or allocation optimization}
+\rightarrow
+\text{economic loss/value}.
+\]
+
+Hydropower is particularly tractable because the economic endpoint is comparatively explicit:
+
+\[
+\text{Revenue}
+=
+\sum_t
+\text{energy price}_t
+\times
+\eta \rho g\,Q^{\mathrm{turbine}}_t H_t.
+\]
+
+You can compare operating policies using:
+
+- Perfect inflow information
+- Climatology
+- LSTM forecast
+- S4 forecast
+- Mamba forecast
+- Mamba plus rare-event memory
+- Probabilistic forecast with optimized decisions
+
+That produces both scientific metrics—low-flow recall, deficit-volume error, calibration—and an interpretable economic metric such as revenue, shortage cost or value of information.
+
+The important boundary is that rainfall–runoff alone predicts hydrological hazard, not economic impact. Monetary loss additionally requires exposure, vulnerability, infrastructure, operating rules, market prices or behavioral assumptions. If you only have a dataset such as CAMELS, you can rigorously classify hydrological extremes, but a defensible economic analysis will require adding one of those downstream systems.

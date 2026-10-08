@@ -1,0 +1,97 @@
+Yes—this has been tried, especially with Mamba. The key is to separate three different tasks that are often called “extreme-event modeling.”
+
+### The paper you may be remembering
+
+The closest match to your reconstruction-error description is:
+
+- [Increasing Frequency of Anomalous Precipitation Events in Japan Detected by a Deep Learning Autoencoder](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2021EF002481) — Murakami et al., 2022. A convolutional autoencoder reconstructs daily \(96\times96\) precipitation fields; unusually large reconstruction MSE—above its 95th percentile—is interpreted as an anomalous precipitation event. This is primarily event detection, not advance forecasting.
+
+There is also a paper that is probably even closer to your idea about memory:
+
+- [Modeling Extreme Events in Time Series Prediction](https://hexiangnan.github.io/papers/kdd19-timeseries.pdf) — Ding et al., KDD 2019. This one is not an autoencoder. It uses a GRU forecaster, an explicit memory network containing historical windows associated with extremes, attention-based retrieval, and an Extreme Value Loss derived from EVT. Experiments cover synthetic data, stocks, and climate data.
+
+So you may be combining these two papers in memory: autoencoder reconstruction error from the first and recurrent memory for prediction from the second.
+
+### Have Mamba/S4 models been tested?
+
+Yes, mainly under the name time-series anomaly detection rather than physical extreme-event forecasting.
+
+| Work | Backbone/objective | Decoder? | Relevance |
+|---|---|---:|---|
+| [Joint Selective State Space Model and Detrending](https://arxiv.org/abs/2405.19823), 2024 | Selective SSM/Mamba-style anomaly detector with detrending | Reconstruction-oriented | Early direct Mamba/SSM TSAD experiment |
+| [MambaAD](https://doi.org/10.1016/j.neucom.2025.131385), 2025 | Bidirectional Mamba, masked/contrastive learning, reconstruction score | Yes | Direct replacement of recurrent/Transformer temporal modeling with Mamba |
+| [MemMambaAD](https://doi.org/10.1016/j.engappai.2025.111308), 2025 | Mamba plus a prototype memory module | Yes | Probably the closest published implementation of your “Mamba + memory” idea |
+| [MOC](https://yangrenyu.github.io/paper/icassp2026.pdf), ICASSP 2026 | Mamba for global dynamics, CNN for local spikes, one-class hypersphere objective | **No** | Closest answer to “Mamba without encoder-decoder reconstruction” |
+| [SensitiveMamba](https://doi.org/10.1145/3748522.3779727), 2026 | Mamba encoder, contrastive representation learning, uncertainty-aware reconstruction | Yes | Modern reconstruction variant |
+| [AnoMamba](https://www.ijcai.org/proceedings/2026/276), IJCAI 2026 | Mamba with global dependency reweighting and long-tail priors | Yes | Explicitly addresses anomalies being reconstructed too well |
+| [MSGMamba](https://www.mdpi.com/2072-4292/18/14/2420), 2026 | Graph Mamba plus orthogonal memory; reconstruction and memory-distance scores | Yes | Strong example of combining Mamba state and external prototype memory |
+
+The especially relevant decoder-free result is MOC. It embeds each window with Mamba/CNN and trains normal windows to occupy a compact hypersphere. The anomaly score is latent-space distance rather than reconstruction error. It was tested on AIOps, SWaT, and WADI—not weather extremes—so it establishes architectural feasibility, not yet climate-specific effectiveness.
+
+For S4, direct extreme-event/anomaly experiments are much thinner. A relevant physical-domain result is [S4D-FT for rainfall–runoff simulation](https://escholarship.org/uc/item/4f95v03w), which reports improvements over LSTMs and examines high- and low-flow regimes. But it is a hydrological forecasting model, not an EVT-aware or one-class extreme detector.
+
+For Hyena, I could not find a convincing published experiment specifically targeting time-series extreme-event detection or forecasting. Hyena has mostly been evaluated in language, genomics, vision, and generic long-sequence tasks. It is a plausible backbone, but currently a research hypothesis rather than an established choice for this task.
+
+### One important correction
+
+“Extremes naturally have high autoencoder error” is useful intuition, but it is not guaranteed.
+
+A high-capacity autoencoder can learn an approximate identity function and reconstruct anomalies surprisingly well. Conversely, a perfectly normal regime shift or poorly scaled high-amplitude observation may produce a large error. Reconstruction error detects departure from the learned manifold, which is not necessarily the same as being statistically extreme.
+
+Also:
+
+- A marginal extreme is simply a large or small value.
+- A contextual anomaly is unusual given recent history or covariates.
+- An extreme-event forecast asks whether an extreme will happen in the future.
+
+Only the first two can be detected retrospectively with ordinary reconstruction error.
+
+### How I would build the Mamba version
+
+For detection without an encoder-decoder:
+
+\[
+x_{t-L:t}\rightarrow
+\text{Mamba/S4 backbone}\rightarrow z_t
+\rightarrow
+s_t=\min_k \|z_t-p_k\|^2
+\]
+
+Here \(p_k\) are learned normal prototypes or memory entries. Train with a one-class/Deep-SVDD-style loss, possibly with synthetic anomalies or contrastive augmentations. This is essentially a climate-adapted version of MOC.
+
+For actual advance prediction:
+
+\[
+\text{causal Mamba state}
+\rightarrow
+\begin{cases}
+P(y_{t+1:t+H}>u),\\
+\text{severity/tail distribution}
+\end{cases}
+\]
+
+I would use:
+
+- A causal Mamba or S4D backbone.
+- An event-probability head trained with EVL, focal loss, or class-balanced BCE.
+- A severity head using quantiles or a generalized Pareto distribution above threshold \(u\).
+- An external prototype memory containing precursor windows to historical extremes.
+- Attention or nearest-neighbour retrieval from that memory, following Ding et al.
+
+The external memory matters because Mamba’s hidden state is not the same thing as an episodic memory. It is a compressed, continuously updated summary and may discard rare patterns. A prototype bank explicitly preserves rare precursor/event examples. S4 has the same limitation. Standard Hyena is an implicit long convolution, so it has even less of a natural persistent-memory interpretation.
+
+### Recommendation
+
+The most informative experiment would be a controlled backbone/objective ablation:
+
+1. GRU + Ding memory + EVL.
+2. Mamba + EVL.
+3. Mamba + external extreme-event memory + EVL.
+4. S4D + the same heads.
+5. Hyena + the same heads.
+6. Mamba + one-class latent objective for detection.
+7. Autoencoder reconstruction baseline.
+
+Evaluate forecasting with event PR-AUC, recall at fixed false-alarm rate, lead time, Brier score/calibration, and tail-weighted CRPS or extreme-only RMSE. For detection, use event-based precision/recall rather than only point-adjusted F1. Use chronological, event-disjoint splits so windows around the same extreme cannot leak into both training and test data.
+
+My short verdict: **Mamba plus an EVT-aware prediction head and explicit prototype memory is well motivated and only partially explored.** Mamba anomaly detection is now established, including memory-augmented and decoder-free variants, but the combination of decoder-free Mamba/S4, episodic precursor memory, and physical extreme-event forecasting still looks like a credible research gap.

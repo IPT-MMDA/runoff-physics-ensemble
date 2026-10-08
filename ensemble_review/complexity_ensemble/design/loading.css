@@ -1,0 +1,32 @@
+/* Replace Gradio's animated status mark with a simple two-color ring. */
+div:has(> svg[viewBox="-1200 -1200 3000 3000"]) {
+  position: relative;
+  width: 44px;
+  height: 44px;
+}
+
+div:has(> svg[viewBox="-1200 -1200 3000 3000"]) > svg {
+  display: none;
+}
+
+div:has(> svg[viewBox="-1200 -1200 3000 3000"])::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  box-sizing: border-box;
+  border: 4px solid #2563eb;
+  border-right-color: #eab308;
+  border-bottom-color: #eab308;
+  border-radius: 50%;
+  animation: assessment-loading-spin 0.9s linear infinite;
+}
+
+@keyframes assessment-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  div:has(> svg[viewBox="-1200 -1200 3000 3000"])::after {
+    animation: none;
+  }
+}

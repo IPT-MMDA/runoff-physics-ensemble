@@ -1,0 +1,3 @@
+# Full local setup: app, GIF export, optional TDA/KAN methods, and tests.
+# Install from the repository root with: python -m pip install -r requirements.txt
+-e ./ensemble_review[animations,tda,kan,dev]

@@ -1,0 +1,25 @@
+{
+  "architectures": [
+    "mlp",
+    "pinnmamba"
+  ],
+  "basin": "2011",
+  "batch_size": 64,
+  "csv": null,
+  "data_root": "/mnt/c/Users/micro/Downloads/camels_ch/camels_ch",
+  "device": "cuda",
+  "end": "2020-12-31",
+  "epochs": 20,
+  "learning_rate": 0.001,
+  "output": "artifacts/hydrology/extreme_events/results.csv",
+  "quantile": 0.95,
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "sequence_length": 30,
+  "source": "camels_ch",
+  "start": "2000-01-01",
+  "without_landcover": false
+}

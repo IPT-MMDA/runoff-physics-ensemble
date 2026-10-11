@@ -22,6 +22,8 @@ from typing import Callable, Iterable, Mapping, Sequence
 
 import torch
 
+from .devices import randperm, resolve_device, seeded_generator
+
 from .camels_ch_chem import (
     CAMELS_CH_CHEM_DYNAMIC_FEATURES, DEFAULT_CAMELS_CH_CHEM_FEATURES,
     CAMELSCHChemPressures,
@@ -678,10 +680,10 @@ def _train(
     static, targets = split.static_inputs.to(device), split.targets.to(device)
     if strategy.approach in {"soft_routing", "hard_routing", "distillation"}:
         model.fit_router(inputs)
-    generator = torch.Generator(device=device).manual_seed(seed + 104729)
+    generator = seeded_generator(device, seed + 104729)
 
     def batches(epoch: int):
-        permutation = torch.randperm(len(inputs), generator=generator, device=device)
+        permutation = randperm(len(inputs), generator=generator, device=device)
         for start in range(0, len(inputs), hp.batch_size):
             yield permutation[start:start + hp.batch_size]
 
@@ -800,7 +802,7 @@ def _train(
     for epoch in range(strategy.distillation_epochs):
         if _cancelled(token): return
         total = 0.0
-        perm = simple_indices[torch.randperm(len(simple_indices), generator=generator, device=device)]
+        perm = simple_indices[randperm(len(simple_indices), generator=generator, device=device)]
         for start in range(0, len(perm), hp.batch_size):
             if _cancelled(token): return
             indices = perm[start:start+hp.batch_size]
@@ -1040,6 +1042,7 @@ def run_regional_experiment(
 ) -> ExperimentResult:
     """Train one shared regional model per seed and predict selected targets."""
     started = time.perf_counter(); config.validate()
+    device = resolve_device(config.hyperparameters.device)
     catalog = catalog or CAMELSCHCatalog(config.data_root)
     eligible = tuple(config.basins.eligible_basins or catalog.eligible_ids)
     training = effective_training_basins(config.basins, eligible)
@@ -1079,9 +1082,7 @@ def run_regional_experiment(
     physics_candidate_metrics: list[list[dict[str, float]]] = []
     physics_candidate_indices: list[int] = []
     failures = load_failures
-    device = torch.device(config.hyperparameters.device)
-    if device.type == "cuda" and not torch.cuda.is_available():
-        raise ValueError("CUDA was requested but is not available")
+    resolved["hyperparameters"]["device"] = str(device)
     parameter_count = 0
     for seed_index, seed in enumerate(config.hyperparameters.seeds):
         if _cancelled(cancellation_token): break

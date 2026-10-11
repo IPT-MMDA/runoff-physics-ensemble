@@ -15,6 +15,8 @@ from pathlib import Path
 
 import torch
 
+from .devices import randperm, resolve_device, seeded_generator
+
 from .hydrology import HydrologyRoutedOutput, RoutedHydrologyModel
 from .hydrology_consolidation_comparison import train_hydrology_model_with_consolidation
 from .hydrology_data import HydrologyData, HydrologySplit
@@ -147,7 +149,7 @@ def _safe_ratio(numerator: int | float, denominator: int | float) -> float:
 
 
 def _average_precision(scores: torch.Tensor, labels: torch.Tensor) -> float:
-    scores = scores.detach().flatten().double().cpu()
+    scores = scores.detach().flatten().cpu().double()
     labels = labels.detach().flatten().bool().cpu()
     positives = int(labels.sum())
     if positives == 0:
@@ -215,8 +217,8 @@ def extreme_metrics(
     threshold: float,
 ) -> dict[str, float | int]:
     """Return daily, event-level, and continuous runoff metrics."""
-    prediction = prediction.detach().flatten().double().cpu()
-    target = target.detach().flatten().double().cpu()
+    prediction = prediction.detach().flatten().cpu().double()
+    target = target.detach().flatten().cpu().double()
     observed = target > threshold
     predicted = prediction > threshold
     true_positive = int((observed & predicted).sum())
@@ -300,10 +302,10 @@ def _train_independent_experts(
     if approach != "no_routing":
         parameters.extend(model.simple_expert.parameters())
     optimizer = torch.optim.Adam(parameters, lr=config.learning_rate)
-    generator = torch.Generator(device=device).manual_seed(seed + 104729)
+    generator = seeded_generator(device, seed + 104729)
     for epoch in range(config.epochs):
         total = 0.0
-        permutation = torch.randperm(len(inputs), generator=generator, device=device)
+        permutation = randperm(len(inputs), generator=generator, device=device)
         for start in range(0, len(inputs), config.batch_size):
             indices = permutation[start:start + config.batch_size]
             noisy = _add_observation_noise(
@@ -351,7 +353,7 @@ def _predict_independent_approach(
     model.eval()
     inputs = data.test.inputs.to(device)
     if config.inference_noise:
-        generator = torch.Generator(device=device).manual_seed(seed + 300007)
+        generator = seeded_generator(device, seed + 300007)
         inputs = _add_observation_noise(
             inputs, data.feature_names, config.inference_noise, generator
         )
@@ -368,7 +370,7 @@ def _predict_independent_approach(
         elif approach == "stacking":
             validation_inputs = data.validation.inputs.to(device)
             if config.inference_noise:
-                generator = torch.Generator(device=device).manual_seed(seed + 200003)
+                generator = seeded_generator(device, seed + 200003)
                 validation_inputs = _add_observation_noise(
                     validation_inputs,
                     data.feature_names,
@@ -423,7 +425,7 @@ def _predict(
     model.eval()
     inputs = split.inputs.to(device)
     if inference_noise:
-        generator = torch.Generator(device=device).manual_seed(seed + 300007)
+        generator = seeded_generator(device, seed + 300007)
         inputs = _add_observation_noise(
             inputs, feature_names, inference_noise, generator
         )
@@ -511,7 +513,7 @@ def compare_extreme_event_ensembles(
 ) -> list[ExtremeEnsembleRecord]:
     """Train selected ensemble approaches and evaluate the same Q-threshold task."""
     config.validate()
-    device = torch.device(device)
+    device = resolve_device(device)
     train_target = data.train.targets.cpu() * data.discharge_scale.cpu()
     threshold = float(torch.quantile(train_target, config.threshold_quantile))
     records: list[ExtremeEnsembleRecord] = []

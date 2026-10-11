@@ -11,6 +11,8 @@ from statistics import mean, stdev
 
 import torch
 
+from .devices import DEVICE_CHOICES, randperm, resolve_device, seeded_generator
+
 from .hydrology import HydrologyRoutedOutput, RoutedHydrologyModel
 from .hydrology_comparison import (
     _add_observation_noise,
@@ -134,7 +136,7 @@ def train_hydrology_distill_to_simple(
             "the jointly learned gate has no meaningful pre-training partition"
         )
 
-    device = torch.device(device)
+    device = resolve_device(device)
     model.to(device)
     model.train()
     inputs = split.inputs.to(device)
@@ -159,14 +161,14 @@ def train_hydrology_distill_to_simple(
         model.raw_recession,
     ]
     complex_optimizer = torch.optim.Adam(complex_parameters, lr=learning_rate)
-    generator = torch.Generator(device=device).manual_seed(seed + 104729)
+    generator = seeded_generator(device, seed + 104729)
     complex_losses = []
     complex_started = time.perf_counter()
     if verbose:
         print(f"[1/3] training complex teacher on {len(inputs)} samples")
     for epoch in range(complex_epochs):
         epoch_total = 0.0
-        permutation = torch.randperm(len(inputs), generator=generator, device=device)
+        permutation = randperm(len(inputs), generator=generator, device=device)
         for start in range(0, len(inputs), batch_size):
             indices = permutation[start : start + batch_size]
             batch_inputs = _add_observation_noise(
@@ -193,7 +195,7 @@ def train_hydrology_distill_to_simple(
     model.complex_expert.eval()
     model.simple_expert.train()
     simple_optimizer = torch.optim.Adam(model.simple_expert.parameters(), lr=learning_rate)
-    distillation_generator = torch.Generator(device=device).manual_seed(seed + 130363)
+    distillation_generator = seeded_generator(device, seed + 130363)
     simple_indices = torch.nonzero(simple_mask, as_tuple=False).squeeze(-1)
     distillation_losses = []
     distillation_started = time.perf_counter()
@@ -205,7 +207,7 @@ def train_hydrology_distill_to_simple(
     for epoch in range(distillation_epochs):
         epoch_total = 0.0
         permutation = simple_indices[
-            torch.randperm(len(simple_indices), generator=distillation_generator, device=device)
+            randperm(len(simple_indices), generator=distillation_generator, device=device)
         ]
         for start in range(0, len(permutation), batch_size):
             indices = permutation[start : start + batch_size]
@@ -230,14 +232,14 @@ def train_hydrology_distill_to_simple(
 
     model.train()
     joint_optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    consolidation_generator = torch.Generator(device=device).manual_seed(seed + 155921)
+    consolidation_generator = seeded_generator(device, seed + 155921)
     consolidation_losses = []
     consolidation_started = time.perf_counter()
     if verbose:
         print("[3/3] jointly consolidating routed experts")
     for epoch in range(consolidation_epochs):
         epoch_total = 0.0
-        permutation = torch.randperm(
+        permutation = randperm(
             len(inputs), generator=consolidation_generator, device=device
         )
         for start in range(0, len(inputs), batch_size):
@@ -405,7 +407,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--consolidation-weight", type=float, default=0.2)
     parser.add_argument("--complexity-percentile", type=float, default=80.0)
     parser.add_argument("--gate-temperature", type=float, default=0.15)
-    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument("--device", choices=DEVICE_CHOICES, default="auto")
     parser.add_argument("--continue-on-error", action="store_true")
     parser.add_argument("--viz", type=_parse_boolean, default=True, metavar="true|false")
     parser.add_argument(
@@ -581,10 +583,7 @@ def main() -> None:
     if any(value < 0.0 for value in (*args.training_noise_levels, *args.inference_noise_levels)):
         parser.error("noise levels must be non-negative")
 
-    device = torch.device(
-        "cuda" if args.device == "auto" and torch.cuda.is_available()
-        else "cpu" if args.device == "auto" else args.device
-    )
+    device = resolve_device(args.device)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     records: list[HydrologyDistillationRecord] = []
     failures = []

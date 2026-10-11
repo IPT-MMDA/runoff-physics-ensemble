@@ -14,10 +14,13 @@ from dataclasses import asdict
 from pathlib import Path
 
 import torch
+
 DEFAULT_CAMELS_CH_ROOT = Path("/mnt/c/Users/micro/Downloads/camels_ch/camels_ch")
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
+
+from complexity_ensemble.devices import DEVICE_CHOICES, resolve_device  # noqa: E402
 
 from complexity_ensemble.hydrology_data import (  # noqa: E402
     load_camels_ch,
@@ -95,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use binary routing at inference for the hard-routing approach",
     )
     parser.add_argument("--without-baselines", action="store_true")
-    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="cuda")
+    parser.add_argument("--device", choices=DEVICE_CHOICES, default="auto")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument(
         "--output",
@@ -149,13 +152,7 @@ def main() -> None:
             parser.error("--csv is required with --source ukraine_csv")
         series = load_ukraine_csv(args.csv, basin_id=args.basin)
     data = make_hydrology_data(series, sequence_length=args.sequence_length)
-    device = torch.device(
-        "cuda"
-        if args.device == "auto" and torch.cuda.is_available()
-        else "cpu"
-        if args.device == "auto"
-        else args.device
-    )
+    device = resolve_device(args.device)
     records = compare_extreme_event_ensembles(
         data,
         config,

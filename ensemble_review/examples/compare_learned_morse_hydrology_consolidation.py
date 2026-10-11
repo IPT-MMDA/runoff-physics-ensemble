@@ -4,6 +4,8 @@ from pathlib import Path
 
 import torch
 
+from complexity_ensemble.devices import DEVICE_CHOICES, resolve_device
+
 from complexity_ensemble.hydrology_consolidation_comparison import (
     compare_hydrology_models_with_consolidation,
     hydrology_comparison_summary,
@@ -124,7 +126,7 @@ def main(
         help="Boundary agreement weight; set to 0 to disable (default: 0.05)",
     )
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument("--device", choices=DEVICE_CHOICES, default="auto")
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -167,13 +169,7 @@ def main(
         sequence_length=args.sequence_length,
         routing_context_length=max(routing_context_lengths),
     )
-    device = torch.device(
-        "cuda"
-        if args.device == "auto" and torch.cuda.is_available()
-        else "cpu"
-        if args.device == "auto"
-        else args.device
-    )
+    device = resolve_device(args.device)
     potential = None
     calibration = None
     assessment = None

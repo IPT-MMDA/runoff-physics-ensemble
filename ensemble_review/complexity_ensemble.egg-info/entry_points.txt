@@ -1,0 +1,3 @@
+[console_scripts]
+complexity-ensemble-app = complexity_ensemble.app:main
+complexity-ensemble-run = complexity_ensemble.regional_cli:main

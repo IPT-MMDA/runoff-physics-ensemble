@@ -1,0 +1,20 @@
+Metadata-Version: 2.4
+Name: complexity-ensemble
+Version: 0.1.0
+Summary: Morse-routed heterogeneous ensembles for PINNs and neural differential equations
+Requires-Python: >=3.10
+Requires-Dist: matplotlib
+Requires-Dist: numpy
+Requires-Dist: torch
+Requires-Dist: gradio<7,>=6
+Requires-Dist: plotly
+Requires-Dist: pandas
+Requires-Dist: geopandas
+Provides-Extra: animations
+Requires-Dist: Pillow; extra == "animations"
+Provides-Extra: tda
+Requires-Dist: ripser>=0.6; extra == "tda"
+Provides-Extra: kan
+Requires-Dist: pykan>=0.2.8; extra == "kan"
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"

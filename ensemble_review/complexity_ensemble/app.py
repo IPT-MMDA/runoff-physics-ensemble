@@ -6,27 +6,28 @@ import argparse
 import html
 import os
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Iterable
 
+from .services import (execute_experiment, validate_optional_dataset, compare_runs,
+                       replay_episodes, prepare_replay, evaluate_scenario)
+from .devices import DEVICE_CHOICES
 from .camels_ch_chem import (
     CAMELS_CH_CHEM_DYNAMIC_FEATURES, DEFAULT_CAMELS_CH_CHEM_FEATURES,
-    CAMELSCHChemPressures,
 )
 from .design import launch_style
 from .design.config_help import config_info
 from .design.dataset_help import dataset_info
-from .estreams import ESTREAMS_DYNAMIC_FEATURES, EStreamsVegetationSnow
-from .paved_scenario import PavedSiteConfig, run_paved_site_scenario
+from .estreams import ESTREAMS_DYNAMIC_FEATURES
+from .paved_scenario import PavedSiteConfig
 from .rainfall_replay import (
-    event_choices, export_gif, forecast_snapshot, make_replay, replay_figures,
+    export_gif, forecast_snapshot, replay_figures,
 )
 from .regional import (
     BasinScopeConfig, CAMELSCHCatalog, CancellationToken, DateRange, DateSplitConfig,
     ExtremeEventConfig, ForecastConfig, HyperparameterConfig, ModelArchitectureConfig,
     PhysicsModelConfig, RegionalExperimentConfig, TrainingStrategyConfig,
-    run_regional_experiment,
 )
 from .result_registry import (
     DEFAULT_RESULTS_DIRECTORY, FILTER_FIELDS, available_values, discover_runs,
@@ -368,6 +369,7 @@ def build_app(
     camels_chem_root: str | Path | None = None,
     save_results: bool = False,
     results_dir: str | Path = DEFAULT_RESULTS_DIRECTORY,
+    executor=None,
 ):
     """Build a session-scoped Gradio Blocks application."""
     try:
@@ -564,7 +566,7 @@ def build_app(
                 percentile=gr.Number(80,label="Complexity percentile"); temperature=gr.Number(.15,label="Gate temperature")
                 physics_weight=gr.Number(.05,label="Physics weight"); interface_weight=gr.Number(.05,label="Interface weight")
                 routing_weight=gr.Number(.2,label="Routing weight"); compute_weight=gr.Number(0,label="Compute weight")
-            device=gr.Radio(["cpu","cuda"],value="cpu",label="Device")
+            device=gr.Radio(list(DEVICE_CHOICES),value="auto",label="Device")
             with gr.Accordion("Approach and architecture controls",open=False):
                 teacher_epochs=gr.Number(120,precision=0,label="Complex-teacher epochs")
                 distill_epochs=gr.Number(120,precision=0,label="Distillation epochs")
@@ -819,11 +821,11 @@ the leaderboard lets you revisit and compare saved runs.
             if not str(path or "").strip():
                 return "Enter an EStreams dataset directory first."
             try:
-                source = EStreamsVegetationSnow(path)
+                gauge_count = validate_optional_dataset("estreams", path)
             except (OSError, ValueError) as error:
                 return f"EStreams validation failed: {error}"
             return (
-                f"EStreams layout is valid; {len(source.camels_gauge_ids)} "
+                f"EStreams layout is valid; {gauge_count} "
                 "CAMELS-CH gauges are available."
             )
 
@@ -836,11 +838,11 @@ the leaderboard lets you revisit and compare saved runs.
             if not str(path or "").strip():
                 return "Enter a CAMELS-CH-Chem dataset directory first."
             try:
-                source = CAMELSCHChemPressures(path)
+                gauge_count = validate_optional_dataset("camels_chem", path)
             except (OSError, ValueError) as error:
                 return f"CAMELS-CH-Chem validation failed: {error}"
             return (
-                f"CAMELS-CH-Chem layout is valid; {len(source.gauge_ids)} "
+                f"CAMELS-CH-Chem layout is valid; {gauge_count} "
                 "CAMELS-CH catchments are available."
             )
 
@@ -912,6 +914,7 @@ the leaderboard lets you revisit and compare saved runs.
             if run_a_id == run_b_id:
                 raise gr.Error("Select two different saved runs")
             run_a, run_b = by_id[run_a_id], by_id[run_b_id]
+            comparison_data = compare_runs(run_a, run_b)
             table = []
             for field, label in FILTER_FIELDS:
                 table.append([label, run_a.value(field), run_b.value(field), ""])
@@ -927,11 +930,7 @@ the leaderboard lets you revisit and compare saved runs.
             for label, key in metric_labels:
                 value_a = run_a.aggregate_metrics.get(key)
                 value_b = run_b.aggregate_metrics.get(key)
-                delta = (
-                    value_b - value_a
-                    if isinstance(value_a, (int, float)) and isinstance(value_b, (int, float))
-                    else None
-                )
+                delta = comparison_data["aggregate_delta_b_minus_a"].get(key)
                 table.append([label, value_a, value_b, delta])
             table.extend([
                 ["Parameters", run_a.parameter_count, run_b.parameter_count,
@@ -993,15 +992,9 @@ the leaderboard lets you revisit and compare saved runs.
             targets_in_run = result.resolved_config["basins"]["target_basins"]
             if str(basin) not in targets_in_run:
                 raise gr.Error("Select a prediction target from the current run")
-            rows = [row for row in result.predictions if row.basin_id == str(basin)]
-            sequence_length = int(result.resolved_config.get("hyperparameters", {}).get(
-                "sequence_length", 30))
-            start = min(row.target_date for row in rows) - timedelta(days=sequence_length + 7)
-            end = max(row.target_date for row in rows) + timedelta(days=14)
             try:
-                series = catalog.load_series(str(basin), start, end)
-                episodes = event_choices(series, rows, context_days=sequence_length)
-            except (OSError, ValueError) as error:
+                episodes = replay_episodes(result, catalog, str(basin), executor=executor)
+            except (OSError, ValueError, RuntimeError) as error:
                 raise gr.Error(str(error)) from error
             if not episodes:
                 raise gr.Error("No complete rainfall episode with predictions was found")
@@ -1022,17 +1015,10 @@ the leaderboard lets you revisit and compare saved runs.
             extras = [name for name in feature_names if name not in {
                 "precipitation", "temperature", "pet", "previous_discharge", "day_sin", "day_cos"
             }]
-            forecast_mode = result.resolved_config.get("forecast", {}).get("mode", "one_day")
             first = date.fromisoformat(str(episode))
             try:
-                series = catalog.load_series(str(basin), first - timedelta(days=context),
-                                             first + timedelta(days=13))
-                replay = make_replay(
-                    series, rows, first, context_days=context,
-                    extra_features=tuple(extras), static_feature_count=len(static_names),
-                    forecast_mode=forecast_mode,
-                )
-            except (OSError, ValueError) as error:
+                replay = prepare_replay(result, catalog, str(basin), first, executor=executor)
+            except (OSError, ValueError, RuntimeError) as error:
                 raise gr.Error(str(error)) from error
             details = (
                 f"**Input:** {context} preceding days of precipitation, temperature, PET, "
@@ -1163,16 +1149,8 @@ the leaderboard lets you revisit and compare saved runs.
                 raise gr.Error("Select a prediction target from the current run")
             try:
                 setup = paved_site_setup(*site_values)
-                resolved = result.resolved_config
-                train = DateRange(**resolved["dates"]["train"])
-                event_setup = ExtremeEventConfig(**resolved["extremes"])
-                first = min(train.resolved().start, setup.start_date) if setup.start_date else train.resolved().start
-                last = max(row.target_date for row in result.predictions if row.basin_id == basin)
-                series = catalog.load_series(str(basin), first, last)
-                comparison = run_paved_site_scenario(
-                    result.predictions, series, train, event_setup, setup,
-                )
-            except (TypeError, ValueError, FileNotFoundError) as error:
+                comparison = evaluate_scenario(result, catalog, str(basin), setup, executor=executor)
+            except (TypeError, ValueError, FileNotFoundError, RuntimeError) as error:
                 raise gr.Error(str(error)) from error
             frame = pd.DataFrame(comparison.rows)
             daily = frame.groupby("date", as_index=False)[
@@ -1208,8 +1186,8 @@ the leaderboard lets you revisit and compare saved runs.
                     estreams_root=estreams_root,
                     camels_chem_root=camels_chem_root,
                 )
-                result=run_regional_experiment(
-                    config, lambda fraction,message: progress(fraction,desc=message), token
+                result=execute_experiment(
+                    config, lambda fraction,message: progress(fraction,desc=message), token, executor=executor
                 )
             except (ValueError, FileNotFoundError, RuntimeError) as error:
                 raise gr.Error(str(error)) from error
@@ -1328,13 +1306,21 @@ def main() -> None:
         "--results-dir", type=Path, default=DEFAULT_RESULTS_DIRECTORY,
         help="Shared run-registry directory",
     )
+    parser.add_argument("--api-url", help="Submit training to a running API and worker")
+    parser.add_argument("--dataset-id", help="Registered server dataset ID for remote execution")
     args=parser.parse_args()
+    executor = None
+    if args.api_url:
+        if not args.dataset_id:
+            parser.error("--dataset-id is required with --api-url")
+        from .remote import RemoteExecutor
+        executor = RemoteExecutor(args.api_url, args.dataset_id, os.environ.get("RUNOFF_API_TOKEN"))
     if args.data_root is None: parser.error("--data-root or CAMELS_CH_ROOT is required")
     CAMELSCHCatalog.validate_layout(args.data_root)
     build_app(
         args.data_root, estreams_root=args.estreams_root,
         camels_chem_root=args.camels_chem_root,
-        save_results=args.save_results, results_dir=args.results_dir,
+        save_results=args.save_results, results_dir=args.results_dir, executor=executor,
     ).launch(server_name=args.host,server_port=args.port,share=True,**launch_style())
 
 

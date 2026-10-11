@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import torch
 
+from .devices import as_double
+
 
 @torch.no_grad()
 def fit_convex_stacking_weight(
@@ -17,9 +19,9 @@ def fit_convex_stacking_weight(
     fitted result remains an interpolation rather than an extrapolating meta-model.
     Returns the complex-expert weight and the resulting validation MSE.
     """
-    simple = simple_prediction.detach().flatten().double()
-    complex_value = complex_prediction.detach().flatten().double()
-    observed = target.detach().flatten().double()
+    simple = as_double(simple_prediction.detach().flatten())
+    complex_value = as_double(complex_prediction.detach().flatten())
+    observed = as_double(target.detach().flatten())
     if not len(simple) or simple.shape != complex_value.shape or simple.shape != observed.shape:
         raise ValueError("stacking predictions and targets must be non-empty and equally shaped")
     difference = complex_value - simple

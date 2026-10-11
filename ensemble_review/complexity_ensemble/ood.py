@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import torch
 
+from .devices import as_double
+
 
 class MahalanobisOODDetector:
     """Empirical Mahalanobis detector with diagonal covariance shrinkage."""
@@ -43,7 +45,7 @@ class MahalanobisOODDetector:
         inputs: torch.Tensor,
         static_inputs: torch.Tensor | None = None,
     ) -> "MahalanobisOODDetector":
-        values = self.features(inputs, static_inputs).double()
+        values = as_double(self.features(inputs, static_inputs))
         self.mean = values.mean(dim=0)
         centered = values - self.mean
         denominator = max(len(values) - 1, 1)
@@ -61,11 +63,12 @@ class MahalanobisOODDetector:
     def _score_features(self, values: torch.Tensor) -> torch.Tensor:
         if self.mean is None or self.precision is None:
             raise RuntimeError("fit the OOD detector before scoring inputs")
-        centered = values.double() - self.mean.to(values.device)
+        analysis_values = as_double(values)
+        centered = analysis_values - self.mean.to(analysis_values.device)
         squared = torch.einsum(
-            "bi,ij,bj->b", centered, self.precision.to(values.device), centered
+            "bi,ij,bj->b", centered, self.precision.to(analysis_values.device), centered
         )
-        return squared.clamp_min(0.0).sqrt().to(values.dtype)
+        return squared.clamp_min(0.0).sqrt().to(device=values.device, dtype=values.dtype)
 
     @torch.no_grad()
     def score(

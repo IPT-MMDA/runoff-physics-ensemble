@@ -31,7 +31,7 @@ python -m pip install -r requirements.txt
 
 On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1` instead.
 The root [requirements.txt](requirements.txt) installs the package in editable
-mode, the app dependencies, GIF export (`Pillow`), optional TDA and KAN methods,
+mode, the app and API dependencies, GIF export (`Pillow`), optional TDA and KAN methods,
 and `pytest`. The package dependency definitions live in
 [ensemble_review/pyproject.toml](ensemble_review/pyproject.toml).
 
@@ -44,6 +44,39 @@ python -m pip install -e './ensemble_review[animations]'
 
 CPU execution is supported; a compatible PyTorch/CUDA installation is needed
 only if you select a CUDA device. GIF export does not require FFmpeg.
+
+### Apple Silicon / macOS
+
+Use a native ARM64 Python installation (Python 3.10 or newer), rather than
+Apple's older system Python or an interpreter running under Rosetta. Install
+with the same pip commands above; no CUDA toolkit is needed on a Mac.
+
+The app's **Device** setting defaults to `auto`, which selects CUDA if
+available, otherwise Apple's Metal GPU (`mps`) if available, otherwise CPU.
+Choose `mps` explicitly to require the Mac GPU, or `cpu` for CPU execution.
+An unavailable explicitly selected GPU produces an error instead of silently
+switching devices. Programmatic configurations still default to CPU; set
+`hyperparameters.device` to `auto` or `mps` to enable Metal.
+
+Check whether your PyTorch installation can access Metal:
+
+```bash
+python -c 'import torch; print(torch.backends.mps.is_available())'
+```
+
+Training uses float32 on Metal. Double-precision metrics, stacking, and OOD
+analysis run on CPU when necessary; OOD scores return to the training device.
+Seeded permutations and observation noise are generated on CPU for MPS.
+Optional PyKAN discovery and correction evaluation also run on CPU, returning
+correction predictions to the training device. The Mamba implementation uses
+ordinary PyTorch and does not require CUDA extensions.
+
+Performance depends on model size, sequence length, and batch size; compare
+short CPU and MPS runs before launching a large experiment. The Mac GPU does
+not provide CUDA compatibility. If your PyTorch version reports an unsupported
+Metal operator, CPU remains available; `PYTORCH_ENABLE_MPS_FALLBACK=1` can also
+enable CPU fallback for supported fallback cases when set before launching.
+It does not enable double precision on Metal.
 
 ## Provide the data
 
@@ -103,6 +136,9 @@ complexity-ensemble-run \
   --data-root /path/to/camels_ch
 ```
 
+To rerun a configuration saved on another machine, override its device with
+`--device auto`, `--device mps`, or `--device cpu`.
+
 See [results registry](ensemble_review/RESULTS_REGISTRY.md) for saving and
 comparison details, and [events and forecasts](ensemble_review/EVENTS_AND_FORECASTS.md)
 for forecast, event, scenario, and replay definitions.
@@ -112,3 +148,26 @@ for forecast, event, scenario, and replay definitions.
 ```bash
 python -m pytest -q ensemble_review/tests
 ```
+
+## HTTP API and shared worker
+
+The API exposes experiments, progress/cancellation, run comparisons, predictions,
+rainfall replay, GIF export, and paved-site scenarios. Gradio and the CLI remain
+available and can optionally submit training through the same worker.
+
+```bash
+python -m pip install -e './ensemble_review[api,animations]'
+cp api-server.example.json api-server.json
+```
+
+Edit the dataset paths in `api-server.json`, then start these in separate terminals:
+
+```bash
+complexity-ensemble-api --settings api-server.json
+complexity-ensemble-worker --settings api-server.json
+```
+
+Open `http://127.0.0.1:8000/docs`. Set `RUNOFF_API_TOKEN` for authenticated
+integration. Health and OpenAPI work before datasets are available.
+See [the API guide](ensemble_review/API.md) for requests, deployment settings,
+job lifecycle, storage, and remote Gradio/CLI execution.

@@ -4,6 +4,8 @@ from typing import Mapping
 
 import torch
 
+from .devices import randperm, resolve_device, seeded_generator
+
 from .hydrology import (
     HydrologyLosses,
     HydrologyRoutedOutput,
@@ -118,10 +120,10 @@ def train_hydrology_model_with_hard_routing_and_consolidation(
     if isinstance(model, RoutedHydrologyModel):
         model.fit_router(inputs, routing_features)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    generator = torch.Generator(device=device).manual_seed(seed + 104729)
+    generator = seeded_generator(device, seed + 104729)
     for epoch in range(epochs):
         epoch_total = 0.0
-        permutation = torch.randperm(len(inputs), generator=generator, device=device)
+        permutation = randperm(len(inputs), generator=generator, device=device)
         for start in range(0, len(inputs), batch_size):
             indices = permutation[start : start + batch_size]
             batch_inputs = _add_observation_noise(
@@ -201,7 +203,7 @@ def compare_hydrology_models_with_hard_routing_and_consolidation(
             )
         return feature_cache[key]
 
-    device = torch.device(device)
+    device = resolve_device(device)
     records = []
     for seed in seeds:
         for training_noise in sorted(set(training_noise_levels)):

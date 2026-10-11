@@ -9,6 +9,8 @@ from typing import Sequence
 import torch
 from torch import nn
 
+from .devices import randn, seeded_generator
+
 
 PHYSICS_OPTIMIZATION_MODES = (
     "accuracy", "robustness", "balanced", "distillation",
@@ -68,8 +70,10 @@ class KANPhysicsCorrection(nn.Module):
         return (values - self.input_mean) / self.input_scale
 
     def forward(self, physical_inputs: torch.Tensor) -> torch.Tensor:
+        output_device = physical_inputs.device
+        physical_inputs = physical_inputs.to(self.input_mean.device)
         normalized = self.model(self.selected_inputs(physical_inputs)).squeeze(-1)
-        return normalized * self.output_scale + self.output_mean
+        return (normalized * self.output_scale + self.output_mean).to(output_device)
 
 
 def _multkan_class():
@@ -168,8 +172,8 @@ def _noisy_physical(
     seed: int,
 ) -> torch.Tensor:
     result = physical.clone()
-    generator = torch.Generator(device=physical.device).manual_seed(seed)
-    noise = torch.randn(
+    generator = seeded_generator(physical.device, seed)
+    noise = randn(
         (len(result), len(feature_indices)), generator=generator,
         device=result.device, dtype=result.dtype,
     )
@@ -195,6 +199,11 @@ def discover_kan_physics_correction(
     validation_basin_ids: Sequence[str] | None = None,
 ) -> KANPhysicsResult:
     """Fit candidate MultKAN residual laws and select one without touching test data."""
+    # PyKAN's spline fitting uses linear algebra unavailable on Metal. Keep this
+    # optional correction on CPU; forward returns predictions to the caller's device.
+    device = torch.device(device)
+    if device.type == "mps":
+        device = torch.device("cpu")
     if settings.mode not in PHYSICS_OPTIMIZATION_MODES:
         raise ValueError(f"unknown KAN physics mode {settings.mode!r}")
     if settings.mode == "distillation" and (

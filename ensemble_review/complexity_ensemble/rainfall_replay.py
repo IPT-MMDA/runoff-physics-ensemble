@@ -276,14 +276,18 @@ def forecast_diagram(replay: Replay, day_number: int) -> str:
 
 def export_gif(replay: Replay) -> Path:
     """Export a compact chart replay; Pillow is needed only for this action."""
-    from .visualization import _pyplot
-    plt = _pyplot()
     try:
         from matplotlib.animation import FuncAnimation, PillowWriter
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
         from matplotlib.patches import FancyBboxPatch
     except ImportError as error:
         raise RuntimeError("GIF export requires matplotlib and Pillow") from error
-    fig, axes = plt.subplots(2, 2, figsize=(14, 9))
+    # Use a headless canvas explicitly: GIF export also runs in server workers
+    # and must never initialize the macOS GUI backend from a request thread.
+    fig = Figure(figsize=(14, 9))
+    FigureCanvasAgg(fig)
+    axes = fig.subplots(2, 2)
     weather, flow = axes[0]
     bucket, scene = axes[1]
     first = replay.context_days
@@ -366,5 +370,5 @@ def export_gif(replay: Replay) -> Path:
         path.unlink(missing_ok=True)
         raise
     finally:
-        plt.close(fig)
+        fig.clear()
     return path

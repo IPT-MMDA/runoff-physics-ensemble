@@ -7,6 +7,8 @@ from pathlib import Path
 import torch
 from torch.nn import functional as F
 
+from .devices import randperm, resolve_device, seeded_generator
+
 from .hydrology import (
     LearnedHydrologyMorsePotential,
     SingleComplexHydrologyModel,
@@ -48,6 +50,7 @@ def _slice_split(split: HydrologySplit, start: int, stop: int) -> HydrologySplit
 
 def _spearman(first: torch.Tensor, second: torch.Tensor) -> float:
     def ranks(values: torch.Tensor) -> torch.Tensor:
+        values = values.detach().cpu()
         order = torch.argsort(values.flatten())
         result = torch.empty_like(order, dtype=torch.float64)
         result[order] = torch.arange(len(order), dtype=torch.float64, device=values.device)
@@ -104,7 +107,7 @@ def collect_cross_fitted_utility(
     """Create forward-chained, out-of-sample labels of complex-expert utility."""
     if folds < 2:
         raise ValueError("at least two chronological folds are required")
-    device = torch.device(device)
+    device = resolve_device(device)
     train = data.train
     boundaries = [round(index * len(train.inputs) / folds) for index in range(folds + 1)]
     calibrated_inputs, utilities = [], []
@@ -157,7 +160,7 @@ def train_morse_potential(
     """Fit gradient-magnitude ordering using stochastic pairwise ranking."""
     if epochs < 1 or batch_size < 2:
         raise ValueError("epochs must be positive and batch_size must be at least two")
-    device = torch.device(device)
+    device = resolve_device(device)
     sequence_length = inputs.shape[1]
     inputs = inputs.flatten(start_dim=1).to(device)
     utility = utility.to(device)
@@ -166,17 +169,17 @@ def train_morse_potential(
         sequence_length, feature_names, hidden_dim=hidden_dim
     ).to(device)
     optimizer = torch.optim.Adam(potential.parameters(), lr=learning_rate)
-    generator = torch.Generator(device=device).manual_seed(seed + 65537)
+    generator = seeded_generator(device, seed + 65537)
     last_loss = torch.tensor(float("nan"), device=device)
     for _ in range(epochs):
-        permutation = torch.randperm(len(inputs), generator=generator, device=device)
+        permutation = randperm(len(inputs), generator=generator, device=device)
         for start in range(0, len(inputs), batch_size):
             indices = permutation[start : start + batch_size]
             if len(indices) < 2:
                 continue
             batch_inputs = inputs[indices]
             batch_utility = utility[indices]
-            partner = torch.randperm(len(indices), generator=generator, device=device)
+            partner = randperm(len(indices), generator=generator, device=device)
             utility_difference = batch_utility - batch_utility[partner]
             informative = utility_difference.abs() > 1e-6
             if not bool(informative.any()):
@@ -238,7 +241,7 @@ def assess_learned_morse(
     """Measure potential transfer using pilots trained on all training data."""
     if not 0.0 < top_fraction < 1.0:
         raise ValueError("top_fraction must be strictly between zero and one")
-    device = torch.device(device)
+    device = resolve_device(device)
     torch.manual_seed(seed + 99991)
     simple = SingleSimpleHydrologyModel(
         data.feature_names, data.train.inputs.shape[1], data.discharge_scale,

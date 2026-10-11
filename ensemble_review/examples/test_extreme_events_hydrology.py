@@ -31,6 +31,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
+from complexity_ensemble.devices import DEVICE_CHOICES, resolve_device
 from complexity_ensemble.hydrology import SingleComplexHydrologyModel
 from complexity_ensemble.hydrology_comparison import train_hydrology_model
 from complexity_ensemble.hydrology_data import (
@@ -75,7 +76,7 @@ def _safe_ratio(numerator: int | float, denominator: int | float) -> float:
 
 def _average_precision(scores: torch.Tensor, labels: torch.Tensor) -> float:
     """Average precision with tied scores evaluated as a single threshold."""
-    scores = scores.detach().flatten().double().cpu()
+    scores = scores.detach().flatten().cpu().double()
     labels = labels.detach().flatten().bool().cpu()
     positives = int(labels.sum())
     if positives == 0:
@@ -130,8 +131,8 @@ def evaluate_extremes(
     threshold: float,
 ) -> dict[str, float | int]:
     """Evaluate discharge scores at daily and declustered-event levels."""
-    prediction = prediction.detach().flatten().double().cpu()
-    target = target.detach().flatten().double().cpu()
+    prediction = prediction.detach().flatten().cpu().double()
+    target = target.detach().flatten().cpu().double()
     observed = target > threshold
     predicted = prediction > threshold
     true_positive = int((observed & predicted).sum())
@@ -255,7 +256,7 @@ def run_experiment(
         raise ValueError("architectures must contain only 'mlp' and/or 'pinnmamba'")
     if not seeds:
         raise ValueError("at least one seed is required")
-    device = torch.device(device)
+    device = resolve_device(device)
     train_target = data.train.targets.cpu() * data.discharge_scale.cpu()
     threshold = float(torch.quantile(train_target, quantile))
 
@@ -343,7 +344,7 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
-    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument("--device", choices=DEVICE_CHOICES, default="auto")
     parser.add_argument(
         "--output",
         type=Path,
@@ -366,13 +367,7 @@ def main() -> None:
             parser.error("--csv is required with --source ukraine_csv")
         series = load_ukraine_csv(args.csv, basin_id=args.basin)
     data = make_hydrology_data(series, sequence_length=args.sequence_length)
-    device = torch.device(
-        "cuda"
-        if args.device == "auto" and torch.cuda.is_available()
-        else "cpu"
-        if args.device == "auto"
-        else args.device
-    )
+    device = resolve_device(args.device)
     records = run_experiment(
         data,
         architectures=architectures,

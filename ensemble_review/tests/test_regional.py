@@ -511,3 +511,28 @@ def test_regional_catalog_does_not_require_optional_annual_landcover(tmp_path):
     series = catalog.load_series("4009", date(2001, 1, 1), date(2001, 1, 5))
     assert len(series.dates) == 5
     assert series.forcing_names == ("precipitation", "temperature", "pet")
+
+
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="MPS is unavailable")
+@pytest.mark.parametrize("complex_expert", ["mlp", "pinnmamba"])
+@pytest.mark.parametrize("approach", [
+    "soft_routing", "hard_routing", "distillation", "no_routing",
+    "static_50_50", "ood_fallback", "stacking",
+])
+def test_mps_regional_training_and_predictions(complex_expert, approach):
+    series = {"a": _series("a"), "target": _series("target", .4)}
+    catalog = CAMELSCHCatalog(".", [BasinCatalogRecord(key) for key in series])
+    config = RegionalExperimentConfig(
+        ".", BasinScopeConfig(("target",), "all_basins"), _dates(),
+        ModelArchitectureConfig(
+            complex_expert=complex_expert, simple_expert="fourier",
+            mlp_widths=(8,), fourier_frequencies=4,
+            mamba_hidden_size=8, mamba_layers=1, mamba_feed_forward_size=8,
+        ),
+        TrainingStrategyConfig(approach, 1, 1, 1, 1),
+        HyperparameterConfig(sequence_length=7, batch_size=128, training_noise=0.1, device="mps"),
+    )
+    result = run_regional_experiment(config, catalog=catalog, series_by_basin=series)
+    assert result.predictions and not result.failures
+    assert result.resolved_config["hyperparameters"]["device"] == "mps"
+    assert all(torch.isfinite(torch.tensor(list(result.aggregate_metrics.values()))))

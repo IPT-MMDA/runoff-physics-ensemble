@@ -9,6 +9,8 @@ from typing import Mapping
 import torch
 from torch import nn
 
+from .devices import as_double, randn, randperm, resolve_device, seeded_generator
+
 from .hydrology import (
     LearnedHydrologyMorsePotential,
     RoutedHydrologyModel,
@@ -68,14 +70,14 @@ def _add_observation_noise(
         device=inputs.device,
         dtype=inputs.dtype,
     )[None, None, :]
-    return inputs + noise * torch.randn(
+    return inputs + noise * randn(
         inputs.shape, generator=generator, device=inputs.device
     ) * mask
 
 
 def _metrics(prediction: torch.Tensor, target: torch.Tensor) -> tuple[float, float, float]:
-    prediction = prediction.flatten().double()
-    target = target.flatten().double()
+    prediction = as_double(prediction.flatten())
+    target = as_double(target.flatten())
     error = prediction - target
     rmse = torch.sqrt(error.square().mean())
     denominator = (target - target.mean()).square().sum().clamp_min(1e-12)
@@ -216,9 +218,9 @@ def train_hydrology_model(
     if isinstance(model, RoutedHydrologyModel):
         model.fit_router(inputs, routing_features)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    generator = torch.Generator(device=device).manual_seed(seed + 104729)
+    generator = seeded_generator(device, seed + 104729)
     for _ in range(epochs):
-        permutation = torch.randperm(len(inputs), generator=generator, device=device)
+        permutation = randperm(len(inputs), generator=generator, device=device)
         for start in range(0, len(inputs), batch_size):
             indices = permutation[start : start + batch_size]
             batch_inputs = _add_observation_noise(
@@ -253,7 +255,7 @@ def _evaluate(
     inputs = split.inputs.to(device)
     physical = split.physical_inputs.to(device)
     if inference_noise:
-        generator = torch.Generator(device=device).manual_seed(seed)
+        generator = seeded_generator(device, seed)
         inputs = _add_observation_noise(inputs, data.feature_names, inference_noise, generator)
     routing_features = None if routing_features is None else routing_features.to(device)
     if isinstance(model, RoutedHydrologyModel):
@@ -318,7 +320,7 @@ def compare_hydrology_models(
                 seed=score_seed,
             )
         return feature_cache[key]
-    device = torch.device(device)
+    device = resolve_device(device)
     records = []
     for seed in seeds:
         for training_noise in sorted(set(training_noise_levels)):

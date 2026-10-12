@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "complexity-ensemble"
 version = "0.1.0"
 description = "Morse-routed heterogeneous ensembles for PINNs and neural differential equations"
+license = { text = "Proprietary. All rights reserved. Any use requires prior written notice and express written permission; commercial use requires a separate prior written agreement. See the repository LICENSE." }
 requires-python = ">=3.10"
 dependencies = ["matplotlib", "numpy", "torch", "gradio>=6,<7", "plotly", "pandas", "geopandas"]
 

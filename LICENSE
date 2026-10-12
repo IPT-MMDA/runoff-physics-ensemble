@@ -1,16 +1,70 @@
-MIT License
+Proprietary License — Prior Notice and Written Permission Required
 
 Copyright (c) 2026 Alexander Y
+All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Scope and reservation of rights
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+These terms apply to the original software, source code, documentation, and
+other original materials in this repository (the "Materials") owned by the
+copyright holder. No license or permission is granted by publication,
+availability, possession, or receipt of the Materials. All rights not
+expressly granted in a separate written agreement are reserved.
+
+2. Prior notice and permission for any use
+
+Before any use of the Materials, you must provide the copyright holder with
+written notice identifying yourself and, if applicable, your organization,
+the intended purpose, the Materials and version involved, and the proposed
+scope and duration of use. You must also obtain the copyright holder's
+express written permission before beginning that use. This requirement
+applies to commercial and noncommercial use alike, including personal,
+academic, educational, research, evaluation, and internal use.
+
+Notice alone does not constitute permission. Silence, failure to respond,
+or acknowledgement of receipt does not constitute consent. Any use outside
+the expressly approved scope requires new prior notice and written permission.
+
+3. Commercial use requires a separate agreement
+
+Commercial use is prohibited unless the copyright holder and the user have
+entered into a separate written commercial license agreement before that
+use begins. Commercial use includes selling, licensing, monetizing, or
+incorporating the Materials into a product or service; providing paid
+consulting or other services using the Materials; and using the Materials
+for business operations or for commercial advantage, directly or indirectly.
+Noncommercial permission does not authorize commercial use.
+
+4. Copying, modification, and distribution
+
+Without express prior written authorization, you may not execute, copy,
+modify, create derivative works from, publish, redistribute, sublicense,
+sell, or otherwise exploit any part of the Materials. Any authorized copy
+must retain this license and the applicable copyright notices, unless the
+copyright holder expressly agrees otherwise in writing. Permission is
+limited to its stated recipient and scope and is not transferable or
+sublicensable unless expressly agreed in writing.
+
+5. Requests
+
+Send notices and permission or commercial-license requests to Alexander Y
+through the contact methods published on the repository owner's GitHub
+profile, or through an issue at:
+https://github.com/IPT-MMDA/runoff-physics-ensemble/issues
+
+A request must reach the copyright holder, and use must not begin until
+express written permission or the required commercial agreement is obtained.
+
+6. Third-party materials and existing rights
+
+Third-party dependencies, datasets, and other materials remain subject to
+their respective licenses. These terms do not grant rights in those materials
+or override rights that cannot be restricted under applicable law or binding
+platform terms. These terms apply to versions distributed under this license
+and do not revoke permissions already granted for earlier versions under
+another license, including the MIT License.
+
+7. Disclaimer of warranty and limitation of liability
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,

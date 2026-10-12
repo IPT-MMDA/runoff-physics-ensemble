@@ -1,5 +1,23 @@
 # Regional rainfall–runoff ensemble
 
+## License and permission
+
+Copyright (c) 2026 Alexander Y. All rights reserved. This project uses a
+[custom proprietary license](LICENSE). **Any use requires prior written
+notice and express written permission**, including personal, academic,
+research, and other noncommercial use. **Commercial use requires a separate
+written agreement before use begins.** Copying, modification, and
+redistribution also require express written authorization.
+
+Submit notices and permission requests through the repository owner's
+published GitHub contact methods or the
+[repository issue tracker](https://github.com/IPT-MMDA/runoff-physics-ensemble/issues).
+Notice alone is not permission; wait for express written authorization.
+Earlier versions distributed under MIT retain their existing permissions.
+Third-party dependencies and datasets retain their own licenses.
+
+## Overview
+
 This project predicts **daily discharge at a basin gauge** (mm/day) from the
 preceding days of meteorological forcing and discharge. The Gradio app runs
 regional experiments across CAMELS-CH basins, compares model approaches, and

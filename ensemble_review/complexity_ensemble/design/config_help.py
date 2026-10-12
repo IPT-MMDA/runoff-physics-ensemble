@@ -2,6 +2,20 @@
 
 
 _CONFIG_HELP = {
+    "complexity_method": (
+        "Complexity routing method",
+        "Morse scores the wetness/flow potential gradient. PH measures persistent "
+        "loops in a delay embedding of past discharge. Takens scores the effective "
+        "covariance dimension of that embedding; it is a geometric proxy, not a "
+        "true attractor-dimension estimate. Lyapunov estimates the divergence of "
+        "similar historical trajectories. PH, Takens, and Lyapunov use only past "
+        "discharge, normalized within each window. Larger scores favor the complex "
+        "expert; invalid estimates fall back to the simple expert. PH requires "
+        "the optional ripser dependency. Routing history must cover the model "
+        "sequence and embedding; Lyapunov additionally needs enough history for "
+        "its fit and neighbor exclusion. These settings affect soft/hard routing "
+        "and distillation, including a routed physics-distillation teacher.",
+    ),
     "dates": (
         "Train, validation, and test dates",
         "Choose three ordered, non-overlapping date ranges. Training fits the models; "

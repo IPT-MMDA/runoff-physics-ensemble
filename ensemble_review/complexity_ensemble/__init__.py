@@ -23,6 +23,7 @@ from .hydrology_complexity import (
     HydrologyComplexityEstimator,
     LyapunovComplexityEstimator,
     TakensPersistenceEstimator,
+    TakensDimensionEstimator,
     build_hydrology_complexity_estimator,
     takens_delay_embedding,
 )
@@ -107,4 +108,5 @@ __all__ = [
     "filter_runs",
     "save_run",
     "takens_delay_embedding",
+    "TakensDimensionEstimator",
 ]

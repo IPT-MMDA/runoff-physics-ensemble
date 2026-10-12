@@ -18,3 +18,8 @@ Provides-Extra: kan
 Requires-Dist: pykan>=0.2.8; extra == "kan"
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
+Provides-Extra: api
+Requires-Dist: fastapi<1,>=0.115; extra == "api"
+Requires-Dist: pydantic<3,>=2.9; extra == "api"
+Requires-Dist: uvicorn<1,>=0.30; extra == "api"
+Requires-Dist: httpx<1,>=0.27; extra == "api"

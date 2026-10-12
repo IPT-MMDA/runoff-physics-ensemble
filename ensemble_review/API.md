@@ -80,6 +80,40 @@ are rejected, including nested misspellings. Numbers must be JSON numbers;
 NaN and infinity are rejected. Optional feature selections use
 `config.estreams_features` and `config.camels_chem_features`.
 
+Complexity routing is selected through `config.hyperparameters.complexity_method`:
+`morse` (default), `ph`, `takens`, or `lyapunov`. The older experimental name
+`tda` is accepted as an alias for PH. These settings apply to soft/hard routing,
+distillation, and routed physics-distillation teachers. Static blends, stacking,
+OOD fallback, and no-routing approaches otherwise ignore them. The CLI and
+saved-run configurations use these same fields. For example:
+
+```json
+{
+  "complexity_method": "ph",
+  "routing_context_length": 365,
+  "embedding_dim": 3,
+  "embedding_delay": 7,
+  "ph_min_persistence": 0.1,
+  "ph_score": "total_persistence"
+}
+```
+
+Place these fields inside `config.hyperparameters` and select a routed training
+approach. `ph_score` also accepts `persistent_holes` and `persistence_entropy`.
+Takens uses effective covariance rank of the delay embedding, rather than PH.
+Lyapunov additionally accepts `lyapunov_theiler_window` (30 days),
+`lyapunov_fit_horizon` (20 subsampled steps), and `lyapunov_min_r2` (0.8).
+Routing history must cover the model sequence and delay embedding; Lyapunov
+also requires enough points for its fitting horizon and neighbor exclusion.
+Only training estimates fit the routing threshold. Rolling forecasts recompute
+scores after replacing future observed discharge with predictions.
+
+`GET /api/v1/capabilities` lists `complexity_methods` and reports Ripser availability
+as `optional_methods.ph`. Install `./ensemble_review[tda]` in the worker's
+environment to run PH. Results persist the selected settings and include
+`complexity_method`, `complexity_routing_active`, and, for history-based routes,
+`valid_complexity_fraction` and `mean_complexity_score` in routing diagnostics.
+
 ```bash
 curl -H "Authorization: Bearer $RUNOFF_API_TOKEN" \
   http://127.0.0.1:8000/api/v1/datasets

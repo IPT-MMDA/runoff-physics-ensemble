@@ -138,7 +138,9 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
         return {"devices": {"cpu": True, "cuda": torch.cuda.is_available(),
                             "mps": torch.backends.mps.is_available()},
                 "device_choices": DEVICE_CHOICES, "training_approaches": TRAINING_APPROACHES,
+                "complexity_methods": ["morse", "ph", "takens", "lyapunov"],
                 "optional_methods": {"kan": importlib.util.find_spec("kan") is not None,
+                                     "ph": importlib.util.find_spec("ripser") is not None,
                                      "gif": importlib.util.find_spec("PIL") is not None},
                 "run_filters": [field for field, _ in FILTER_FIELDS],
                 "checkpoint_inference": False}

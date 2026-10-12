@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from dataclasses import replace
 import csv
 
 import pytest
@@ -31,6 +32,86 @@ def _dates() -> DateSplitConfig:
     return DateSplitConfig(DateRange("2001-01-08", "2001-02-02"),
                            DateRange("2001-02-03", "2001-02-12"),
                            DateRange("2001-02-13", "2001-03-01"))
+
+
+@pytest.mark.parametrize("scope", ["targets_only", "all_basins", "exclude_targets"])
+@pytest.mark.parametrize("gap", ["train", "validation", "test", "continuity"])
+def test_regional_data_skips_basins_without_required_windows(scope, gap):
+    good = _series("good")
+    bad = _series("bad")
+    if gap == "continuity":
+        bad = replace(bad, dates=tuple(day + timedelta(days=index)
+                                      for index, day in enumerate(bad.dates)))
+    else:
+        interval = getattr(_dates(), gap)
+        keep = [index for index, day in enumerate(bad.dates) if not interval.contains(day)]
+        bad = replace(bad, dates=tuple(bad.dates[index] for index in keep),
+                      discharge=bad.discharge[keep], forcings=bad.forcings[keep])
+    series = {"trainer": _series("trainer"), "good": good, "bad": bad}
+    data = make_regional_hydrology_data(
+        series, {"bad": {"only_skipped": 1000}},
+        BasinScopeConfig(("good", "bad"), scope), _dates(), sequence_length=7,
+    )
+    # Held-out targets need validation and test windows, not training windows.
+    should_skip = scope != "exclude_targets" or gap != "train"
+    assert ("bad" in data.skipped_basins) == should_skip
+    assert ("bad" in data.target_basins) != should_skip
+    if should_skip:
+        assert "bad" not in data.train.basin_ids
+        assert "bad" not in data.validation.basin_ids
+        assert "bad" not in data.test.basin_ids
+        assert "only_skipped" not in data.static_feature_names
+    assert data.train.targets.numel() and data.validation.targets.numel() and data.test.targets.numel()
+
+
+def test_regional_data_skips_unusable_training_only_basin():
+    data = make_regional_hydrology_data(
+        {"trainer": _series("trainer"), "target": _series("target")}, {},
+        BasinScopeConfig(("target",), "exclude_targets", ("trainer", "missing", "target")),
+        _dates(), sequence_length=7,
+    )
+    assert data.training_basins == ("trainer",)
+    assert data.target_basins == ("target",)
+    assert "missing" in data.skipped_basins
+
+
+@pytest.mark.parametrize("scope", ["targets_only", "exclude_targets"])
+def test_regional_data_explains_when_no_usable_basins_remain(scope):
+    with pytest.raises(ValueError, match="No usable .* remain"):
+        make_regional_hydrology_data(
+            {"target": _series("target")}, {},
+            BasinScopeConfig(("target",), scope, ("target", "missing")),
+            _dates(), sequence_length=70,
+        )
+
+
+def test_regional_run_skips_target_load_errors_and_records_used_basins(monkeypatch):
+    series = {"good": _series("good")}
+    catalog = CAMELSCHCatalog(".", [BasinCatalogRecord(key) for key in ("good", "bad")])
+
+    def missing_series(*args):
+        raise ValueError("at least three complete daily records are required")
+
+    monkeypatch.setattr(catalog, "load_series", missing_series)
+    config = RegionalExperimentConfig(
+        ".", BasinScopeConfig(("bad", "good"), "targets_only"), _dates(),
+        ModelArchitectureConfig(complex_expert="mlp", simple_expert="fourier",
+                                mlp_widths=(8,), fourier_frequencies=4),
+        TrainingStrategyConfig("no_routing", 1, 1, 1, 1),
+        HyperparameterConfig(sequence_length=7, batch_size=128),
+    )
+    result = run_regional_experiment(config, catalog=catalog, series_by_basin=series)
+    assert result.predictions and not result.failures
+    assert {row.basin_id for row in result.predictions} == {"good"}
+    assert result.resolved_config["basins"]["target_basins"] == ["good"]
+    assert result.resolved_config["effective_training_basins"] == ["good"]
+    assert result.resolved_config["basins"]["eligible_basins"] == ["good"]
+    assert "bad" in result.resolved_config["skipped_basins"]
+    assert config.basins.target_basins == ("bad", "good")
+    from complexity_ensemble.configuration import config_from_mapping
+    rerun_config = config_from_mapping(result.resolved_config)
+    assert rerun_config.basins.target_basins == ("good",)
+    assert rerun_config.basins.eligible_basins == ("good",)
 
 
 def _write_estreams(root, gauge_ids=("a", "target")):

@@ -6,9 +6,9 @@ import math
 import torch
 
 
-ROUTING_METHODS = ("morse", "learned_morse", "learned", "tda", "lyapunov")
+ROUTING_METHODS = ("morse", "learned_morse", "learned", "tda", "ph", "takens", "lyapunov")
 MODEL_NAMES = (*ROUTING_METHODS, "single_complex")
-SCORE_ROUTING_METHODS = frozenset(("tda", "lyapunov"))
+SCORE_ROUTING_METHODS = frozenset(("tda", "ph", "takens", "lyapunov"))
 
 
 def takens_delay_embedding(
@@ -45,6 +45,57 @@ class HydrologyComplexityEstimator(ABC):
     @abstractmethod
     def estimate(self, routing_windows: torch.Tensor) -> torch.Tensor:
         """Return ``[score, confidence]`` for every history window."""
+
+
+class TakensDimensionEstimator(HydrologyComplexityEstimator):
+    """Effective covariance rank of a delay embedding, not a topology score.
+
+    The participation ratio is one for a single active linear direction and
+    approaches embedding_dim when all covariance directions have equal energy.
+    It is a geometric proxy, not an estimate of the attractor's true dimension.
+    """
+
+    def __init__(self, feature_index: int, *, embedding_dim: int = 3,
+                 delay: int = 7, context_length: int | None = None) -> None:
+        if feature_index < 0 or embedding_dim < 2 or delay < 1:
+            raise ValueError("invalid feature index, embedding dimension, or delay")
+        if context_length is not None and context_length < 2:
+            raise ValueError("context_length must be at least two")
+        self.feature_index = feature_index
+        self.embedding_dim = embedding_dim
+        self.delay = delay
+        self.context_length = context_length
+
+    @torch.no_grad()
+    def estimate(self, routing_windows: torch.Tensor) -> torch.Tensor:
+        self._validate_windows(routing_windows)
+        if self.feature_index >= routing_windows.shape[-1]:
+            raise ValueError("feature_index is outside the routing feature dimension")
+        series = routing_windows[:, :, self.feature_index].detach().cpu().double()
+        if self.context_length is not None:
+            series = series[:, -self.context_length:]
+        estimates = []
+        for window in series:
+            scale = window.std(unbiased=False)
+            if not torch.isfinite(scale) or float(scale) < 1e-6:
+                estimates.append((0.0, 0.0))
+                continue
+            points = takens_delay_embedding(
+                (window - window.mean()) / scale,
+                embedding_dim=self.embedding_dim, delay=self.delay,
+            )
+            centered = points - points.mean(dim=0)
+            eigenvalues = torch.linalg.eigvalsh(
+                centered.T @ centered / len(centered)
+            ).clamp_min(0.0)
+            energy = eigenvalues.sum()
+            if not torch.isfinite(energy) or float(energy) < 1e-12:
+                estimates.append((0.0, 0.0))
+            else:
+                rank = energy.square() / eigenvalues.square().sum().clamp_min(1e-12)
+                estimates.append((float(rank), 1.0))
+        return torch.tensor(estimates, dtype=routing_windows.dtype,
+                            device=routing_windows.device)
 
 
 class TakensPersistenceEstimator(HydrologyComplexityEstimator):
@@ -155,8 +206,8 @@ class LyapunovComplexityEstimator(HydrologyComplexityEstimator):
     ) -> None:
         if feature_index < 0:
             raise ValueError("feature_index must be non-negative")
-        if theiler_window < 1 or fit_horizon < 3:
-            raise ValueError("theiler_window must be positive and fit_horizon at least three")
+        if theiler_window < 1 or fit_horizon < 4:
+            raise ValueError("theiler_window must be positive and fit_horizon at least four")
         if not 0.0 <= min_r2 < 1.0:
             raise ValueError("min_r2 must be in [0, 1)")
         if max_points < fit_horizon + 2:
@@ -255,8 +306,10 @@ def build_hydrology_complexity_estimator(
     if "previous_discharge" not in feature_names:
         raise ValueError("previous_discharge is required for dynamical complexity routing")
     feature_index = feature_names.index("previous_discharge")
-    if kind == "tda":
+    if kind in {"tda", "ph"}:
         return TakensPersistenceEstimator(feature_index, **kwargs)
+    if kind == "takens":
+        return TakensDimensionEstimator(feature_index, **kwargs)
     if kind == "lyapunov":
         return LyapunovComplexityEstimator(feature_index, **kwargs)
     raise ValueError(f"no time-series complexity estimator is registered for {kind!r}")
@@ -269,6 +322,7 @@ __all__ = [
     "ROUTING_METHODS",
     "SCORE_ROUTING_METHODS",
     "TakensPersistenceEstimator",
+    "TakensDimensionEstimator",
     "build_hydrology_complexity_estimator",
     "takens_delay_embedding",
 ]

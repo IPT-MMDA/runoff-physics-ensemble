@@ -100,6 +100,38 @@ class APITests(unittest.TestCase):
         self.assertEqual(set(self.client.get("/api/v1/missing").json()), {"code", "message", "details"})
         self.assertIn("/api/v1/experiments", schema["paths"])
         self.assertIn("/api/v1/runs/{run_id}/scenarios", schema["paths"])
+        hyperparameters = schema["components"]["schemas"]["HyperparameterRequest"]["properties"]
+        self.assertIn("ph", hyperparameters["complexity_method"]["enum"])
+        capabilities = self.client.get("/api/v1/capabilities").json()
+        self.assertEqual(capabilities["complexity_methods"], ["morse", "ph", "takens", "lyapunov"])
+        self.assertIn("ph", capabilities["optional_methods"])
+
+    def test_history_routing_configuration_reaches_worker_and_saved_run(self):
+        for method in ("takens", "lyapunov"):
+            with self.subTest(method=method):
+                body = payload()
+                body["config"]["strategy"]["approach"] = "hard_routing"
+                body["config"]["hyperparameters"].update(
+                    complexity_method=method, routing_context_length=21,
+                    embedding_dim=2, embedding_delay=2,
+                    lyapunov_theiler_window=3, lyapunov_fit_horizon=4,
+                )
+                response = self.client.post("/api/v1/experiments", json=body)
+                self.assertEqual(response.status_code, 202, response.text)
+                job = self.process_next()
+                self.assertEqual(job["status"], "succeeded", job)
+                self.assertFalse(job["result"]["execution_failed"], job)
+                run = self.application.runs.get(job["result"]["run_id"])
+                self.assertEqual(run.config["hyperparameters"]["complexity_method"], method)
+                self.assertEqual(run.routing_diagnostics["complexity_method"], method)
+
+    def test_invalid_complexity_selection_and_context_are_rejected(self):
+        body = payload()
+        body["config"]["hyperparameters"]["complexity_method"] = "unknown"
+        self.assertEqual(self.client.post("/api/v1/experiments", json=body).status_code, 422)
+        body = payload()
+        body["config"]["hyperparameters"].update(complexity_method="takens", routing_context_length=3)
+        self.assertEqual(self.client.post("/api/v1/experiments", json=body).status_code, 422)
 
     def test_unknown_fields_and_server_paths_are_rejected(self):
         body = payload()

@@ -1,7 +1,12 @@
 pyproject.toml
 complexity_ensemble/__init__.py
+complexity_ensemble/api.py
+complexity_ensemble/api_models.py
 complexity_ensemble/app.py
+complexity_ensemble/application.py
 complexity_ensemble/camels_ch_chem.py
+complexity_ensemble/configuration.py
+complexity_ensemble/devices.py
 complexity_ensemble/estreams.py
 complexity_ensemble/experts.py
 complexity_ensemble/hydrology.py
@@ -14,6 +19,7 @@ complexity_ensemble/hydrology_events.py
 complexity_ensemble/hydrology_extreme_comparison.py
 complexity_ensemble/hydrology_hard_routing_consolidation_comparison.py
 complexity_ensemble/hydrology_morse_learning.py
+complexity_ensemble/jobs.py
 complexity_ensemble/kan_physics.py
 complexity_ensemble/ood.py
 complexity_ensemble/paved_scenario.py
@@ -21,10 +27,15 @@ complexity_ensemble/pinnmamba.py
 complexity_ensemble/rainfall_replay.py
 complexity_ensemble/regional.py
 complexity_ensemble/regional_cli.py
+complexity_ensemble/remote.py
 complexity_ensemble/result_registry.py
 complexity_ensemble/routing.py
+complexity_ensemble/serialization.py
+complexity_ensemble/server_settings.py
+complexity_ensemble/services.py
 complexity_ensemble/stacking.py
 complexity_ensemble/visualization.py
+complexity_ensemble/worker.py
 complexity_ensemble.egg-info/PKG-INFO
 complexity_ensemble.egg-info/SOURCES.txt
 complexity_ensemble.egg-info/dependency_links.txt
@@ -35,6 +46,9 @@ complexity_ensemble/design/__init__.py
 complexity_ensemble/design/config_help.py
 complexity_ensemble/design/dataset_help.py
 complexity_ensemble/design/loading.css
+tests/test_api.py
+tests/test_complexity_routing.py
+tests/test_devices.py
 tests/test_hydrology.py
 tests/test_hydrology_complexity.py
 tests/test_hydrology_consolidation.py
@@ -42,6 +56,7 @@ tests/test_hydrology_distil_to_simple.py
 tests/test_hydrology_events.py
 tests/test_hydrology_extreme_comparison.py
 tests/test_hydrology_hard_routing_consolidation.py
+tests/test_jobs.py
 tests/test_kan_physics.py
 tests/test_learned_morse.py
 tests/test_ood.py

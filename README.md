@@ -13,6 +13,18 @@ snow-cover data and CAMELS-CH-Chem catchment predictors can be added. The
 ensemble can route between a complex Mamba or MLP expert and a simpler RBF or
 Fourier expert; a linear-reservoir relation provides a physics constraint.
 
+The **Complexity routing method** setting in **Training hyperparameters** selects
+Morse (the default), PH, Takens, or Lyapunov for soft/hard routing and distillation.
+PH scores persistent H₁ loops in delay-embedded discharge. Takens scores the
+embedding's effective covariance dimension (a geometric proxy). Lyapunov scores
+the divergence of similar historical discharge trajectories. These alternatives
+use a separate, past-only discharge history (365 days by default), with adjustable
+embedding dimension and delay. Rolling forecasts replace future discharge in
+both model and routing histories with predictions. PH requires the `tda` extra
+(`ripser`), already included by the root requirements. Invalid estimates fall
+back to the simple expert. Other training approaches ignore the routing choice,
+except when a routed physics-distillation teacher is selected.
+
 The replay's **input-to-prediction diagram** shows which dates feed each
 forecast and which day's discharge is predicted. Its separate teaching bucket
 is uncalibrated and does not show the trained model's internal water storage.
@@ -109,6 +121,11 @@ target basins and dates, choose the data and model setup, then run an experiment
 in **Results**. After it finishes, **Rainfall–runoff replay** can select a
 rainfall episode, inspect each forecast day, and generate a GIF. The replay
 requires the original CAMELS-CH files as well as the run predictions.
+
+Catchments without complete daily input windows for their required date splits
+are skipped automatically. Training uses the remaining catchments, and the
+completion message lists those skipped. If no usable training catchments or
+prediction targets remain, the app explains why the experiment cannot run.
 
 To use optional datasets and keep completed runs in the leaderboard:
 

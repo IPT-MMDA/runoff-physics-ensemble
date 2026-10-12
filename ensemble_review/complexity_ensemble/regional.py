@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from threading import Event
-from typing import Callable, Iterable, Mapping, Sequence
+from typing import Callable, Iterable, Literal, Mapping, Sequence
 
 import torch
 
@@ -31,6 +31,7 @@ from .camels_ch_chem import (
 from .hydrology import HydrologyRoutedOutput, RoutedHydrologyModel
 from .hydrology_comparison import _add_observation_noise, _metrics
 from .hydrology_data import HydrologySeries, load_camels_ch
+from .hydrology_complexity import SCORE_ROUTING_METHODS, build_hydrology_complexity_estimator
 from .estreams import ESTREAMS_DYNAMIC_FEATURES, EStreamsVegetationSnow
 from .hydrology_extreme_comparison import extreme_metrics
 from .hydrology_events import EVENT_TYPES, basin_event_metrics, regional_event_metrics
@@ -128,6 +129,15 @@ class HyperparameterConfig:
     device: str = "cpu"
     ood_quantile: float = 0.99
     ood_shrinkage: float = 0.1
+    complexity_method: Literal["morse", "ph", "takens", "lyapunov", "tda"] = "morse"
+    routing_context_length: int = 365
+    embedding_dim: int = 3
+    embedding_delay: int = 7
+    ph_min_persistence: float = 0.1
+    ph_score: Literal["total_persistence", "persistent_holes", "persistence_entropy"] = "total_persistence"
+    lyapunov_theiler_window: int = 30
+    lyapunov_fit_horizon: int = 20
+    lyapunov_min_r2: float = 0.8
 
 
 @dataclass(frozen=True)
@@ -222,6 +232,28 @@ class RegionalExperimentConfig:
             raise ValueError("noise and loss weights must be non-negative")
         if not 0 < hp.complexity_percentile < 100 or hp.gate_temperature <= 0:
             raise ValueError("complexity percentile and gate temperature are invalid")
+        if hp.complexity_method not in {"morse", *SCORE_ROUTING_METHODS}:
+            raise ValueError("complexity_method must be morse, ph, takens, or lyapunov (tda is a PH alias)")
+        if hp.complexity_method in SCORE_ROUTING_METHODS:
+            span = (hp.embedding_dim - 1) * hp.embedding_delay + 1
+            if hp.embedding_dim < 2 or hp.embedding_delay < 1:
+                raise ValueError("embedding_dim must be at least two and embedding_delay positive")
+            if hp.routing_context_length < max(hp.sequence_length, span + 1):
+                raise ValueError("routing_context_length must cover the sequence and delay embedding")
+            if not math.isfinite(hp.ph_min_persistence) or hp.ph_min_persistence < 0 or hp.ph_score not in {
+                "total_persistence", "persistent_holes", "persistence_entropy"
+            }:
+                raise ValueError("invalid PH persistence settings")
+            if (hp.lyapunov_theiler_window < 1 or not 4 <= hp.lyapunov_fit_horizon <= 254
+                    or not 0 <= hp.lyapunov_min_r2 < 1):
+                raise ValueError("invalid Lyapunov settings")
+            if hp.complexity_method == "lyapunov":
+                point_count = hp.routing_context_length - span + 1
+                stride = max(1, math.ceil(point_count / 256))
+                retained = math.ceil(point_count / stride)
+                if (retained <= hp.lyapunov_fit_horizon + 2
+                        or (retained - 1) * stride <= hp.lyapunov_theiler_window):
+                    raise ValueError("routing_context_length is too short for the Lyapunov horizon and exclusion window")
         if not 0 < hp.ood_quantile < 1 or not 0 <= hp.ood_shrinkage <= 1:
             raise ValueError("OOD quantile or covariance shrinkage is invalid")
         if self.physics.name not in PHYSICS_MODELS:
@@ -452,6 +484,7 @@ class RegionalSplit:
     target_dates: tuple[date, ...]
     basin_ids: tuple[str, ...]
     routing_inputs: torch.Tensor | None = None
+    routing_features: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -468,6 +501,7 @@ class RegionalHydrologyData:
     discharge_scale: torch.Tensor
     training_basins: tuple[str, ...]
     target_basins: tuple[str, ...]
+    skipped_basins: Mapping[str, str] = field(default_factory=dict)
 
 
 def effective_training_basins(scope: BasinScopeConfig, eligible: Iterable[str]) -> tuple[str, ...]:
@@ -502,16 +536,52 @@ def make_regional_hydrology_data(
     dates: DateSplitConfig,
     *,
     sequence_length: int = 30,
+    routing_context_length: int | None = None,
 ) -> RegionalHydrologyData:
     """Create windows first, then assign them by target date without leakage."""
     if sequence_length < 2:
         raise ValueError("sequence_length must be at least two")
+    routing_context_length = sequence_length if routing_context_length is None else routing_context_length
+    if routing_context_length < sequence_length:
+        raise ValueError("routing_context_length must be at least sequence_length")
     targets = tuple(dict.fromkeys(map(str, scope.target_basins)))
     training_basins = effective_training_basins(scope, series_by_basin)
     relevant = tuple(dict.fromkeys((*training_basins, *targets)))
-    missing = set(relevant) - set(series_by_basin)
-    if missing:
-        raise ValueError(f"series missing for basins: {sorted(missing)}")
+    ranges = {"train": dates.train.resolved(), "validation": dates.validation.resolved(),
+              "test": dates.test.resolved()}
+    window_indices: dict[str, dict[str, list[int]]] = {}
+    skipped: dict[str, str] = {}
+    for basin in relevant:
+        if basin not in series_by_basin:
+            skipped[basin] = "no complete daily records available in the selected date range"
+            continue
+        series = series_by_basin[basin]
+        indices = {name: [] for name in ranges}
+        for index in range(routing_context_length, len(series.dates)):
+            if series.dates[index] - series.dates[index - routing_context_length] != timedelta(days=routing_context_length):
+                continue
+            if any(series.dates[j + 1] - series.dates[j] != timedelta(days=1)
+                   for j in range(index - routing_context_length, index)):
+                continue
+            for name, interval in ranges.items():
+                if interval.contains(series.dates[index]):
+                    indices[name].append(index)
+                    break
+        required = (["train"] if basin in training_basins else []) + (
+            ["validation", "test"] if basin in targets else []
+        )
+        unavailable = [name for name in required if not indices[name]]
+        if unavailable:
+            skipped[basin] = "no complete input windows in: " + ", ".join(unavailable)
+        else:
+            window_indices[basin] = indices
+    training_basins = tuple(basin for basin in training_basins if basin not in skipped)
+    targets = tuple(basin for basin in targets if basin not in skipped)
+    if not training_basins or not targets:
+        missing_role = "training basins" if not training_basins else "prediction target basins"
+        details = "; ".join(f"{basin}: {reason}" for basin, reason in skipped.items())
+        raise ValueError(f"No usable {missing_role} remain for the selected date splits and input-window length. {details}")
+    relevant = tuple(basin for basin in relevant if basin not in skipped)
     forcing_names = series_by_basin[relevant[0]].forcing_names
     if any(series_by_basin[item].forcing_names != forcing_names for item in relevant):
         raise ValueError("all regional series must have identical forcing columns")
@@ -531,9 +601,7 @@ def make_regional_hydrology_data(
     else:
         static_mean, static_scale = torch.empty(0), torch.empty(0)
 
-    ranges = {"train": dates.train.resolved(), "validation": dates.validation.resolved(),
-              "test": dates.test.resolved()}
-    buckets: dict[str, list[tuple[torch.Tensor, torch.Tensor, float, date, str, torch.Tensor]]] = {
+    buckets: dict[str, list[tuple[torch.Tensor, torch.Tensor, float, date, str, torch.Tensor, torch.Tensor]]] = {
         "train": [], "validation": [], "test": []
     }
     all_train_physical: list[torch.Tensor] = []
@@ -547,26 +615,23 @@ def make_regional_hydrology_data(
         raw = [static_attributes.get(basin, {}).get(name) for name in static_names]
         static = torch.tensor([static_mean[index] if value is None or not math.isfinite(float(value))
                                else float(value) for index, value in enumerate(raw)])
-        for target_index in range(sequence_length, len(series.dates)):
-            first = target_index - sequence_length
-            if series.dates[target_index] - series.dates[first] != timedelta(days=sequence_length):
-                continue
-            target_date = series.dates[target_index]
-            split_name = next((name for name, item in ranges.items() if item.contains(target_date)), None)
-            if split_name is None:
-                continue
-            # Only effective model-training basins contribute training samples;
-            # validation and test are prediction-target views.
-            if split_name == "train" and basin not in training_basins:
-                continue
-            if split_name != "train" and basin not in targets:
-                continue
-            window = features[first:target_index]
-            buckets[split_name].append((window, window, float(series.discharge[target_index]),
-                                        target_date, basin, static))
-            if split_name == "train":
-                all_train_physical.append(window)
-                all_train_targets.append(float(series.discharge[target_index]))
+        for split_name, indices in window_indices[basin].items():
+            for target_index in indices:
+                first = target_index - sequence_length
+                target_date = series.dates[target_index]
+                # Only effective model-training basins contribute training samples;
+                # validation and test are prediction-target views.
+                if split_name == "train" and basin not in training_basins:
+                    continue
+                if split_name != "train" and basin not in targets:
+                    continue
+                window = features[first:target_index]
+                buckets[split_name].append((window, window, float(series.discharge[target_index]),
+                                            target_date, basin, static,
+                                            features[target_index - routing_context_length:target_index]))
+                if split_name == "train":
+                    all_train_physical.append(window)
+                    all_train_targets.append(float(series.discharge[target_index]))
     if not all_train_physical:
         raise ValueError("no training windows fall in the requested training date range")
     if not buckets["validation"] or not buckets["test"]:
@@ -586,11 +651,12 @@ def make_regional_hydrology_data(
         statics = (statics - static_mean) / static_scale if static_names else statics
         return RegionalSplit(normalized, physical, statics,
                              torch.tensor([row[2] for row in rows]) / discharge_scale,
-                             tuple(row[3] for row in rows), tuple(row[4] for row in rows), normalized)
+                             tuple(row[3] for row in rows), tuple(row[4] for row in rows),
+                             (torch.stack([row[6] for row in rows]) - feature_mean) / feature_scale)
     return RegionalHydrologyData(build("train"), build("validation"), build("test"),
                                  tuple(feature_names), static_names, feature_mean, feature_scale,
                                  static_mean, static_scale, discharge_scale,
-                                 training_basins, targets)
+                                 training_basins, targets, skipped)
 
 
 class CancellationToken:
@@ -678,8 +744,9 @@ def _train(
     hp, strategy = config.hyperparameters, config.strategy
     inputs, physical = split.inputs.to(device), split.physical_inputs.to(device)
     static, targets = split.static_inputs.to(device), split.targets.to(device)
+    routing_features = None if split.routing_features is None else split.routing_features.to(device)
     if strategy.approach in {"soft_routing", "hard_routing", "distillation"}:
-        model.fit_router(inputs)
+        model.fit_router(inputs, routing_features)
     generator = seeded_generator(device, seed + 104729)
 
     def batches(epoch: int):
@@ -697,12 +764,22 @@ def _train(
                 if _cancelled(token):
                     return
                 noisy = _add_observation_noise(inputs[indices], config_data_names, hp.training_noise, generator)
+                batch_routing = None if routing_features is None else routing_features[indices]
+                if batch_routing is not None and hp.training_noise > 0:
+                    assert split.routing_inputs is not None and model.complexity_estimator is not None
+                    history = _add_observation_noise(
+                        split.routing_inputs[indices.cpu()].to(device), config_data_names,
+                        hp.training_noise, generator,
+                    )
+                    history[:, -inputs.shape[1]:] = noisy
+                    batch_routing = model.complexity_estimator.estimate(history)
                 optimizer.zero_grad()
                 if hard:
                     # Inline the static-aware hard loss.
-                    soft = model(noisy, return_details=True, static_inputs=static[indices])
+                    soft = model(noisy, return_details=True, static_inputs=static[indices],
+                                 routing_features=batch_routing)
                     assert isinstance(soft, HydrologyRoutedOutput)
-                    route = model.router.complex_weight(model._router_features(noisy, None), hard=True)
+                    route = model.router.complex_weight(model._router_features(noisy, batch_routing), hard=True)
                     route = route + soft.complex_weight - soft.complex_weight.detach()
                     discharge = model._positive_discharge(torch.lerp(
                         soft.simple_raw, soft.complex_raw, route[:, None]))
@@ -710,10 +787,11 @@ def _train(
                     physics = model.physics_residual(discharge, physical[indices]).square().mean()
                     transition = 4 * soft.complex_weight * (1 - soft.complex_weight)
                     interface = (transition * (soft.simple_raw-soft.complex_raw).square().squeeze(-1)).mean()
-                    routing = model.router.regularization(model._router_features(noisy, None))
+                    routing = model.router.regularization(model._router_features(noisy, batch_routing))
                     loss = data_loss + hp.physics_weight*physics + hp.interface_weight*interface + hp.routing_weight*routing + hp.compute_weight*soft.complex_weight.mean()
                 else:
                     loss = model.losses(noisy, physical[indices], targets[indices],
+                                        routing_features=batch_routing,
                                         static_inputs=static[indices], physics_weight=hp.physics_weight,
                                         interface_weight=hp.interface_weight,
                                         routing_weight=hp.routing_weight,
@@ -795,7 +873,7 @@ def _train(
             progress((seed_index + (epoch + 1) / strategy.complex_teacher_epochs / 3) / seed_count,
                      f"seed {seed}: complex teacher epoch {epoch + 1}/{strategy.complex_teacher_epochs}")
     with torch.no_grad():
-        simple_indices = torch.nonzero(model.router.complex_weight(model._router_features(inputs, None), hard=True) < .5).squeeze(-1)
+        simple_indices = torch.nonzero(model.router.complex_weight(model._router_features(inputs, routing_features), hard=True) < .5).squeeze(-1)
     if not len(simple_indices):
         raise ValueError("router assigned no samples to the simple expert")
     simple_optimizer = torch.optim.Adam(model.simple_expert.parameters(), lr=hp.learning_rate)
@@ -885,6 +963,7 @@ def _teacher_prediction(
             output = model(
                 inputs, static_inputs=static, return_details=True,
                 hard=approach == "hard_routing",
+                routing_features=None if split.routing_features is None else split.routing_features.to(device),
             )
             assert isinstance(output, HydrologyRoutedOutput)
             return output.discharge.squeeze(-1)
@@ -920,12 +999,13 @@ def _predict_with_approach(
     model: RoutedHydrologyModel, inputs: torch.Tensor, static: torch.Tensor,
     approach: str, *, stacking_weight: float | None = None,
     ood_detector: MahalanobisOODDetector | None = None,
+    routing_features: torch.Tensor | None = None,
 ) -> tuple[HydrologyRoutedOutput, torch.Tensor]:
     """Apply one trained approach to a batch of normalized input windows."""
     ood_score = torch.full((len(inputs),), float("nan"), device=inputs.device)
     if approach not in {"no_routing", "static_50_50", "ood_fallback", "stacking"}:
         output = model(inputs, return_details=True, static_inputs=static,
-                       hard=approach == "hard_routing")
+                       hard=approach == "hard_routing", routing_features=routing_features)
         assert isinstance(output, HydrologyRoutedOutput)
         return output, ood_score
     complex_raw = model.complex_expert(inputs, static)
@@ -957,6 +1037,7 @@ def _rolling_test_predictions(
     model: RoutedHydrologyModel, data: RegionalHydrologyData,
     config: RegionalExperimentConfig, seed: int, device: torch.device,
     *, stacking_weight: float | None, ood_detector: MahalanobisOODDetector | None,
+    complexity_estimates: list[torch.Tensor] | None = None,
 ) -> list[PredictionRecord]:
     """Forecast non-overlapping blocks, replacing future observed flow with predictions.
 
@@ -969,6 +1050,9 @@ def _rolling_test_predictions(
     mean = float(data.feature_mean[q_index])
     std = float(data.feature_scale[q_index])
     horizon = config.forecast.horizon_days
+    estimator = getattr(model, "complexity_estimator", None)
+    if config.strategy.approach not in {"soft_routing", "hard_routing", "distillation"}:
+        estimator = None
     for basin in data.target_basins:
         indices = [index for index, item in enumerate(data.test.basin_ids) if item == basin]
         indices.sort(key=lambda index: data.test.target_dates[index])
@@ -987,6 +1071,14 @@ def _rolling_test_predictions(
                     day = data.test.target_dates[index]
                     normalized = data.test.inputs[index:index + 1].to(device).clone()
                     physical = data.test.physical_inputs[index:index + 1].to(device).clone()
+                    history = None
+                    if estimator is not None:
+                        assert data.test.routing_inputs is not None
+                        history = data.test.routing_inputs[index:index + 1].to(device).clone()
+                        for history_index in range(history.shape[1]):
+                            history_date = day - timedelta(days=history.shape[1] - history_index)
+                            if history_date in predicted_flow:
+                                history[0, history_index, q_index] = (predicted_flow[history_date] - mean) / std
                     for sequence_index in range(normalized.shape[1]):
                         input_date = day - timedelta(days=normalized.shape[1] - sequence_index)
                         if input_date in predicted_flow:
@@ -994,9 +1086,13 @@ def _rolling_test_predictions(
                             physical[0, sequence_index, q_index] = value
                             normalized[0, sequence_index, q_index] = (value - mean) / std
                     static = data.test.static_inputs[index:index + 1].to(device)
+                    routing_features = estimator.estimate(history) if history is not None else None
+                    if routing_features is not None and complexity_estimates is not None:
+                        complexity_estimates.append(routing_features.detach().cpu())
                     output, ood_score = _predict_with_approach(
                         model, normalized, static, config.strategy.approach,
                         stacking_weight=stacking_weight, ood_detector=ood_detector,
+                        routing_features=routing_features,
                     )
                     value = float(output.discharge[0, 0].cpu()) * scale
                     predicted_flow[day] = value
@@ -1027,6 +1123,8 @@ def _resolved(config: RegionalExperimentConfig, data: RegionalHydrologyData) -> 
         item = value["dates"][split]  # type: ignore[index]
         item["start"], item["end"] = str(item["start"]), str(item["end"])
     value["effective_training_basins"] = list(data.training_basins)
+    value["basins"]["target_basins"] = list(data.target_basins)
+    value["skipped_basins"] = dict(data.skipped_basins)
     value["feature_names"] = list(data.feature_names)
     value["static_feature_names"] = list(data.static_feature_names)
     return value
@@ -1047,20 +1145,32 @@ def run_regional_experiment(
     eligible = tuple(config.basins.eligible_basins or catalog.eligible_ids)
     training = effective_training_basins(config.basins, eligible)
     relevant = tuple(dict.fromkeys((*training, *config.basins.target_basins)))
-    full_start = config.dates.train.resolved().start - timedelta(days=config.hyperparameters.sequence_length)  # type: ignore[operator]
+    hp = config.hyperparameters
+    routed_approaches = {"soft_routing", "hard_routing", "distillation"}
+    uses_complexity = (config.strategy.approach in routed_approaches
+                       or (config.physics.optimization_mode == "distillation"
+                           and config.physics.distillation_teacher in routed_approaches))
+    estimator = None
+    if uses_complexity and hp.complexity_method in SCORE_ROUTING_METHODS:
+        estimator_kwargs = dict(embedding_dim=hp.embedding_dim, delay=hp.embedding_delay,
+                                context_length=hp.routing_context_length)
+        if hp.complexity_method in {"ph", "tda"}:
+            estimator_kwargs.update(min_persistence=hp.ph_min_persistence, score=hp.ph_score)
+        elif hp.complexity_method == "lyapunov":
+            estimator_kwargs.update(theiler_window=hp.lyapunov_theiler_window,
+                                    fit_horizon=hp.lyapunov_fit_horizon, min_r2=hp.lyapunov_min_r2)
+        # Feature names are known after constructing the regional data below.
+    context_length = hp.routing_context_length if uses_complexity and hp.complexity_method in SCORE_ROUTING_METHODS else hp.sequence_length
+    full_start = config.dates.train.resolved().start - timedelta(days=context_length)  # type: ignore[operator]
     full_end = config.dates.test.resolved().end
     series = dict(series_by_basin or {})
-    load_failures: list[str] = []
-    target_set = set(config.basins.target_basins)
+    load_failures: dict[str, str] = {}
     for basin in relevant:
         if basin not in series:
             try:
                 series[basin] = catalog.load_series(basin, full_start, full_end)  # type: ignore[arg-type]
             except (ValueError, FileNotFoundError) as error:
-                message = f"basin {basin} could not be loaded: {error}"
-                if basin in target_set:
-                    raise ValueError(message) from error
-                load_failures.append(message)
+                load_failures[basin] = str(error)
     if config.estreams_root is not None:
         series = EStreamsVegetationSnow(config.estreams_root).augment(
             series, config.estreams_features
@@ -1071,17 +1181,46 @@ def run_regional_experiment(
         )
     loaded = tuple(basin for basin in relevant if basin in series)
     attrs = {basin: catalog.get(basin).static_attributes for basin in loaded}
-    data = make_regional_hydrology_data(series, attrs, config.basins, config.dates,
-                                        sequence_length=config.hyperparameters.sequence_length)
+    scope = replace(config.basins, eligible_basins=eligible)
+    data = make_regional_hydrology_data(series, attrs, scope, config.dates,
+                                        sequence_length=hp.sequence_length,
+                                        routing_context_length=context_length)
+    if uses_complexity and hp.complexity_method in SCORE_ROUTING_METHODS:
+        estimator = build_hydrology_complexity_estimator(hp.complexity_method, data.feature_names,
+                                                        **estimator_kwargs)
+        assert data.train.routing_inputs is not None
+        estimator.fit(data.train.routing_inputs)
+        scored = {}
+        for name in ("train", "validation", "test"):
+            split = getattr(data, name)
+            assert split.routing_inputs is not None
+            features = []
+            for start in range(0, len(split.inputs), hp.batch_size):
+                if _cancelled(cancellation_token):
+                    break
+                if progress_callback:
+                    progress_callback(0.0, f"Computing {hp.complexity_method} routing scores: "
+                                      f"{name} {start}/{len(split.inputs)}")
+                features.append(estimator.estimate(split.routing_inputs[start:start + hp.batch_size]))
+            if _cancelled(cancellation_token):
+                return ExperimentResult([], {}, {}, {}, {}, [], [], _resolved(config, data),
+                                        runtime_seconds=time.perf_counter() - started, cancelled=True)
+            scored[name] = replace(split, routing_features=torch.cat(features))
+        data = replace(data, **scored)
     resolved = _resolved(config, data)
+    resolved["skipped_basins"].update(load_failures)
+    resolved["basins"]["eligible_basins"] = [
+        basin for basin in eligible if basin not in resolved["skipped_basins"]
+    ]
     traces: dict[str, list[float]] = {}; predictions: list[PredictionRecord] = []
+    complexity_estimates: list[torch.Tensor] = []
     ood_thresholds: list[float] = []
     stacking_weights: list[float] = []
     stacking_validation_mses: list[float] = []
     physics_formulas: list[str] = []
     physics_candidate_metrics: list[list[dict[str, float]]] = []
     physics_candidate_indices: list[int] = []
-    failures = load_failures
+    failures: list[str] = []
     resolved["hyperparameters"]["device"] = str(device)
     parameter_count = 0
     for seed_index, seed in enumerate(config.hyperparameters.seeds):
@@ -1095,7 +1234,9 @@ def run_regional_experiment(
                 return RoutedHydrologyModel(
                     data.feature_names, data.train.inputs.shape[1], data.discharge_scale,
                     simple_kind=config.model.simple_expert,
-                    complex_kind=config.model.complex_expert, routing="morse",
+                    complex_kind=config.model.complex_expert,
+                    routing=hp.complexity_method if estimator is not None else "morse",
+                    complexity_estimator=estimator,
                     complexity_percentile=config.hyperparameters.complexity_percentile,
                     gate_temperature=config.hyperparameters.gate_temperature,
                     simple_kwargs=simple_kwargs, complex_kwargs=complex_kwargs,
@@ -1255,14 +1396,19 @@ def run_regional_experiment(
                     predictions.extend(_rolling_test_predictions(
                         model, data, config, seed, device,
                         stacking_weight=stacking_weight, ood_detector=detector,
+                        complexity_estimates=complexity_estimates,
                     ))
                 else:
                     output, ood_score = _predict_with_approach(
                         model, data.test.inputs.to(device), data.test.static_inputs.to(device),
                         config.strategy.approach, stacking_weight=stacking_weight,
                         ood_detector=detector,
+                        routing_features=(data.test.routing_features.to(device)
+                                          if data.test.routing_features is not None else None),
                     )
                     predicted = output.discharge.squeeze(-1).cpu() * data.discharge_scale
+                    if data.test.routing_features is not None and config.strategy.approach in routed_approaches:
+                        complexity_estimates.append(data.test.routing_features)
                     observed = data.test.targets * data.discharge_scale
                     residual = model.physics_residual(
                         output.discharge, data.test.physical_inputs.to(device)
@@ -1321,6 +1467,13 @@ def run_regional_experiment(
                 "kan_selection_scope": "target_validation",
             })
     else: aggregate, routing = {}, {}
+    routing["complexity_method"] = hp.complexity_method
+    routing["complexity_routing_active"] = uses_complexity
+    if complexity_estimates:
+        estimates = torch.cat(complexity_estimates)
+        valid = estimates[:, 1] > 0
+        routing["valid_complexity_fraction"] = float(valid.float().mean())
+        routing["mean_complexity_score"] = float(estimates[:, 0].mean())
     resolved["fitted_diagnostics"] = dict(routing)
     extremes = []
     if config.extremes.mode == "statistical":

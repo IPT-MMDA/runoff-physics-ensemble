@@ -11,7 +11,7 @@ from torch.nn import functional as F
 
 from .experts import MLPExpert, build_expert
 from .pinnmamba import PINNMamba
-from .hydrology_complexity import SCORE_ROUTING_METHODS
+from .hydrology_complexity import HydrologyComplexityEstimator, SCORE_ROUTING_METHODS
 from .routing import LearnedRouter, MorseRouter, ScoreRouter
 
 
@@ -272,6 +272,7 @@ class RoutedHydrologyModel(_HydrologyModelBase):
         complex_kwargs: dict[str, object] | None = None,
         learned_morse_potential: LearnedHydrologyMorsePotential | None = None,
         static_dim: int = 0,
+        complexity_estimator: HydrologyComplexityEstimator | None = None,
     ) -> None:
         super().__init__(discharge_scale, feature_names)
         feature_count = len(feature_names)
@@ -325,6 +326,7 @@ class RoutedHydrologyModel(_HydrologyModelBase):
         self.complex_kind = complex_kind
         self.routing_kind = routing
         self.static_dim = static_dim
+        self.complexity_estimator = complexity_estimator
 
     def _router_features(
         self,

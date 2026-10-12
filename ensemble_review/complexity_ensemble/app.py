@@ -320,6 +320,15 @@ def _config_from_ui_values(
             float(values[18]), float(values[29]), float(values[30]), values[31],
             float(values[34]) if len(values) > 34 else 0.99,
             float(values[35]) if len(values) > 35 else 0.1,
+            complexity_method=values[64] if len(values) > 64 else "morse",
+            routing_context_length=int(values[65]) if len(values) > 65 else 365,
+            embedding_dim=int(values[66]) if len(values) > 66 else 3,
+            embedding_delay=int(values[67]) if len(values) > 67 else 7,
+            ph_min_persistence=float(values[68]) if len(values) > 68 else 0.1,
+            ph_score=values[69] if len(values) > 69 else "total_persistence",
+            lyapunov_theiler_window=int(values[70]) if len(values) > 70 else 30,
+            lyapunov_fit_horizon=int(values[71]) if len(values) > 71 else 20,
+            lyapunov_min_r2=float(values[72]) if len(values) > 72 else 0.8,
         ),
         PhysicsModelConfig(
             optimization_mode=values[36] if len(values) > 36 else "none",
@@ -558,6 +567,38 @@ def build_app(
             replay_gif = gr.File(label="Replay GIF")
             replay_state = gr.State(None)
         with gr.Tab("Training hyperparameters"):
+            with gr.Row():
+                complexity_method = gr.Dropdown(
+                    [("Morse — wetness / flow gradient", "morse"),
+                     ("PH — persistent loops", "ph"),
+                     ("Takens — embedding effective dimension", "takens"),
+                     ("Lyapunov — trajectory divergence", "lyapunov")],
+                    value="morse", label="Complexity routing method",
+                    info="Used by soft routing, hard routing, and distillation. Other approaches ignore this choice.",
+                )
+                config_info(gr, "complexity_method")
+            with gr.Accordion("Discharge-history complexity settings", open=True, visible=False) as complexity_settings:
+                with gr.Row():
+                    routing_context = gr.Number(365, precision=0, label="Routing history (days)")
+                    embedding_dim = gr.Number(3, precision=0, label="Embedding dimension")
+                    embedding_delay = gr.Number(7, precision=0, label="Embedding delay (days)")
+                with gr.Row(visible=False) as ph_settings:
+                    ph_min_persistence = gr.Number(0.1, label="Minimum loop persistence")
+                    ph_score = gr.Dropdown(
+                        ["total_persistence", "persistent_holes", "persistence_entropy"],
+                        value="total_persistence", label="PH score",
+                    )
+                with gr.Row(visible=False) as lyapunov_settings:
+                    lyapunov_theiler = gr.Number(30, precision=0, label="Neighbor exclusion (days)")
+                    lyapunov_horizon = gr.Number(20, precision=0, label="Divergence fit steps")
+                    lyapunov_r2 = gr.Number(0.8, label="Minimum divergence fit R²")
+            complexity_method.change(
+                lambda method: (gr.update(visible=method != "morse"),
+                                gr.update(visible=method == "ph"),
+                                gr.update(visible=method == "lyapunov")),
+                inputs=complexity_method,
+                outputs=[complexity_settings, ph_settings, lyapunov_settings],
+            )
             with gr.Row():
                 sequence=gr.Number(30,precision=0,label="Sequence length"); seeds=gr.Textbox("0",label="Seeds")
                 epochs=gr.Number(20,precision=0,label="Epochs"); batch=gr.Number(64,precision=0,label="Batch size")
@@ -1213,6 +1254,18 @@ the leaderboard lets you revisit and compare saved runs.
                     f"Completed in {result.runtime_seconds:.1f}s. This run was not persisted "
                     "because result saving is disabled."
                 )
+            skipped = result.resolved_config.get("skipped_basins", {})
+            if skipped:
+                labels = {record.basin_id: record.name for record in catalog.records}
+                catchments = ", ".join(
+                    f"{labels.get(basin, basin)} ({basin})"
+                    if labels.get(basin, basin) != basin else basin
+                    for basin in skipped
+                )
+                message += (
+                    f"\n\nThese catchments were skipped because no usable data was available "
+                    f"for the selected date splits and input-window length: {catchments}."
+                )
             basin,historical,future,hydro,points,route,losses=result_views(
                 result, (target_values or [None])[0]
             )
@@ -1250,7 +1303,7 @@ the leaderboard lets you revisit and compare saved runs.
         def refresh_result_views(basin, result):
             return refresh_result(basin, result)[1:]
 
-        inputs=[targets,scope,train_start,train_end,val_start,val_end,test_start,test_end,approach,complex_expert,simple_expert,epochs,sequence,seeds,batch,learning_rate,noise,percentile,temperature,physics_weight,interface_weight,teacher_epochs,distill_epochs,consolidation_epochs,mlp_widths,mamba_hidden,mamba_layers,mamba_ff,rbf_centers,fourier_frequencies,extreme_mode,routing_weight,compute_weight,device,definition,extreme_value,ood_quantile,ood_shrinkage,physics_optimization,physics_teacher,kan_candidates,kan_steps,kan_grid,kan_order,kan_additive,kan_multiplicative,kan_sparsity,kan_noise_levels,kan_accuracy_tolerance,kan_symbolic,use_estreams,estreams_path,estreams_features,use_camels_chem,camels_chem_path,camels_chem_features,forecast_mode,horizon_days,event_types,high_quantile,low_quantile,rise_quantile,minimum_days,pulse_gap_days,minimum_basins,fall_quantile]
+        inputs=[targets,scope,train_start,train_end,val_start,val_end,test_start,test_end,approach,complex_expert,simple_expert,epochs,sequence,seeds,batch,learning_rate,noise,percentile,temperature,physics_weight,interface_weight,teacher_epochs,distill_epochs,consolidation_epochs,mlp_widths,mamba_hidden,mamba_layers,mamba_ff,rbf_centers,fourier_frequencies,extreme_mode,routing_weight,compute_weight,device,definition,extreme_value,ood_quantile,ood_shrinkage,physics_optimization,physics_teacher,kan_candidates,kan_steps,kan_grid,kan_order,kan_additive,kan_multiplicative,kan_sparsity,kan_noise_levels,kan_accuracy_tolerance,kan_symbolic,use_estreams,estreams_path,estreams_features,use_camels_chem,camels_chem_path,camels_chem_features,forecast_mode,horizon_days,event_types,high_quantile,low_quantile,rise_quantile,minimum_days,pulse_gap_days,minimum_basins,fall_quantile,complexity_method,routing_context,embedding_dim,embedding_delay,ph_min_persistence,ph_score,lyapunov_theiler,lyapunov_horizon,lyapunov_r2]
         prepare = run.click(lambda: CancellationToken(), outputs=token_state, queue=False)
         scenario_prepare = run_scenario_experiment.click(
             lambda: (CancellationToken(), True),

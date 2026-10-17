@@ -149,8 +149,26 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
     def datasets():
         return {"items": [{"dataset_id": key, "available": registration.data_root.is_dir(),
                             "estreams_configured": registration.estreams_root is not None,
-                            "camels_chem_configured": registration.camels_chem_root is not None}
+                            "camels_chem_configured": registration.camels_chem_root is not None,
+                            "hyd_responses_configured": registration.hyd_responses_root is not None}
                            for key, registration in settings.datasets.items()]}
+
+    @router.get("/ui/bootstrap")
+    def ui_bootstrap():
+        """Public configuration defaults for the browser, without server paths."""
+        from .regional import (ModelArchitectureConfig, TrainingStrategyConfig,
+                               HyperparameterConfig, PhysicsModelConfig,
+                               ExtremeEventConfig, ForecastConfig)
+        config = {name: asdict(cls()) for name, cls in (
+            ("model", ModelArchitectureConfig), ("strategy", TrainingStrategyConfig),
+            ("hyperparameters", HyperparameterConfig), ("physics", PhysicsModelConfig),
+            ("extremes", ExtremeEventConfig), ("forecast", ForecastConfig))}
+        config.update(basins={"target_basins": [], "training_scope": "exclude_targets"},
+                      dates={"train": {"start": "2010-01-01", "end": "2016-08-06"},
+                             "validation": {"start": "2016-08-07", "end": "2018-10-18"},
+                             "test": {"start": "2018-10-19", "end": "2020-12-31"}})
+        return {"config": json_safe(config), "leaderboard_enabled": settings.results_dir is not None,
+                "schema": ExperimentRequest.model_json_schema()}
 
     @router.get("/datasets/{dataset_id}/validation")
     def validate_dataset(dataset_id: str):
@@ -158,7 +176,7 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
         registration = application.registration(dataset_id)
         catalog = application.catalog(dataset_id)
         optional = {}
-        for kind in ("estreams", "camels_chem"):
+        for kind in ("estreams", "camels_chem", "hyd_responses"):
             path = getattr(registration, kind + "_root")
             if path is not None:
                 optional[kind] = {"gauges": validate_optional_dataset(kind, path)}
@@ -173,13 +191,15 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
     @router.get("/datasets/{dataset_id}/features")
     def features(dataset_id: str):
         from .estreams import ESTREAMS_DYNAMIC_FEATURES
+        from .hyd_responses import HYD_RESPONSES_FEATURES
         from .camels_ch_chem import CAMELS_CH_CHEM_DYNAMIC_FEATURES
         registration = application.registration(dataset_id)
         catalog = application.catalog(dataset_id)
         return {"dynamic": ["precipitation", "temperature", "pet", "previous_discharge", "day_sin", "day_cos"],
                 "static_attributes": sorted({name for row in catalog.records for name in row.static_attributes}),
                 "estreams": list(ESTREAMS_DYNAMIC_FEATURES) if registration.estreams_root else [],
-                "camels_chem": list(CAMELS_CH_CHEM_DYNAMIC_FEATURES) if registration.camels_chem_root else []}
+                "camels_chem": list(CAMELS_CH_CHEM_DYNAMIC_FEATURES) if registration.camels_chem_root else [],
+                "hyd_responses": list(HYD_RESPONSES_FEATURES) if registration.hyd_responses_root else []}
 
     @router.post("/experiments/validate")
     def validate_experiment(body: ExperimentRequest):
@@ -222,6 +242,20 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
         runs, _ = application.runs.list()
         selections = filters_from_json(filters)
         return {field: available_values(runs, selections, field) for field, _ in FILTER_FIELDS}
+
+    @router.get("/ui/runs")
+    def ui_runs(offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000)):
+        """Library cards do not need every run's loss traces and event records."""
+        all_runs, warnings = application.runs.list()
+        items = []
+        for run in all_runs[offset:offset + limit]:
+            items.append(json_safe({"run_id": run.run_id, "created_at": run.created_at,
+                                    "config": public_config(run.config),
+                                    "aggregate_metrics": run.aggregate_metrics,
+                                    "parameter_count": run.parameter_count,
+                                    "runtime_seconds": run.runtime_seconds, "cancelled": run.cancelled}))
+        return {"items": items, "total": len(all_runs), "offset": offset, "limit": limit,
+                "invalid_entries": len(warnings)}
 
     @router.get("/runs", response_model=RunsResponse)
     def runs(filters: str | None = None, offset: int = Query(0, ge=0),

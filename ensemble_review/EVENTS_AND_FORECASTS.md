@@ -78,7 +78,9 @@ assessed using predictions from two issue dates, and the next block may use
 newly observed discharge available at that date.
 
 Rolling mode uses **historically observed meteorological and optional predictor
-values** for days after issue. It is therefore a *perfect-weather hindcast* of
+values** for days after issue, except CAMELS-CH and HYD-RESPONSES water-state
+features, which remain at their issue-day values and availability flags.
+It is therefore a *perfect-weather hindcast* of
 the discharge rollout, not an operational forecast issued without future
 weather information. It reuses the trained one-day model; the model is not
 separately trained for each lead time. To make an operational forecast, supply

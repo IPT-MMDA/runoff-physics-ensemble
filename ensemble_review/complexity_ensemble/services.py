@@ -24,6 +24,9 @@ def execute_experiment(config, progress_callback=None, cancellation_token=None, 
 
 
 def validate_optional_dataset(kind, path):
+    if kind == "hyd_responses":
+        from .hyd_responses import HYDResponses
+        return len(HYDResponses(path).gauge_ids)
     if kind == "estreams":
         from .estreams import EStreamsVegetationSnow
         return len(EStreamsVegetationSnow(path).camels_gauge_ids)

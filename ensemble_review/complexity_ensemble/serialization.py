@@ -26,4 +26,4 @@ def json_safe(value):
 
 def public_config(config):
     return {k: v for k, v in json_safe(config).items()
-            if k not in {"data_root", "estreams_root", "camels_chem_root"}}
+            if k not in {"data_root", "estreams_root", "camels_chem_root", "hyd_responses_root"}}

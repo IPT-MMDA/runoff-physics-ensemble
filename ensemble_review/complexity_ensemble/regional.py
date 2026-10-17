@@ -23,6 +23,8 @@ from typing import Callable, Iterable, Literal, Mapping, Sequence
 import torch
 
 from .devices import randperm, resolve_device, seeded_generator
+from .camels_ch_states import CAMELS_CH_STATE_FEATURES, augment_camels_ch_states
+from .hyd_responses import HYDResponses, HYD_RESPONSES_FEATURES, DEFAULT_HYD_RESPONSES_FEATURES
 
 from .camels_ch_chem import (
     CAMELS_CH_CHEM_DYNAMIC_FEATURES, DEFAULT_CAMELS_CH_CHEM_FEATURES,
@@ -194,6 +196,10 @@ class RegionalExperimentConfig:
     camels_chem_root: str | Path | None = None
     camels_chem_features: tuple[str, ...] = DEFAULT_CAMELS_CH_CHEM_FEATURES
     forecast: ForecastConfig = field(default_factory=ForecastConfig)
+    camels_state_features: tuple[str, ...] = ()
+    hyd_responses_root: str | Path | None = None
+    hyd_responses_features: tuple[str, ...] = DEFAULT_HYD_RESPONSES_FEATURES
+    hyd_responses_static: bool = False
 
     def validate(self) -> None:
         targets = tuple(dict.fromkeys(map(str, self.basins.target_basins)))
@@ -310,6 +316,14 @@ class RegionalExperimentConfig:
             not 0 < value < 1 for value in values
         ):
             raise ValueError("quantiles must be strictly between zero and one")
+        unknown_states = set(self.camels_state_features) - set(CAMELS_CH_STATE_FEATURES)
+        unknown_hyd = set(self.hyd_responses_features) - set(HYD_RESPONSES_FEATURES)
+        if unknown_hyd:
+            raise ValueError(f"unknown HYD-RESPONSES features: {sorted(unknown_hyd)}")
+        if self.hyd_responses_root is not None and not self.hyd_responses_features and not self.hyd_responses_static:
+            raise ValueError("enabled HYD-RESPONSES integration requires at least one feature")
+        if unknown_states:
+            raise ValueError(f"unknown CAMELS-CH water-state features: {sorted(unknown_states)}")
         unknown_estreams = set(self.estreams_features) - set(ESTREAMS_DYNAMIC_FEATURES)
         if unknown_estreams:
             raise ValueError(f"unknown EStreams features: {sorted(unknown_estreams)}")
@@ -1050,6 +1064,9 @@ def _rolling_test_predictions(
     mean = float(data.feature_mean[q_index])
     std = float(data.feature_scale[q_index])
     horizon = config.forecast.horizon_days
+    water_states = set(HYD_RESPONSES_FEATURES) | set(CAMELS_CH_STATE_FEATURES)
+    state_indices = [i for i, name in enumerate(data.feature_names)
+                     if name in water_states or name.removesuffix("_available") in water_states]
     estimator = getattr(model, "complexity_estimator", None)
     if config.strategy.approach not in {"soft_routing", "hard_routing", "distillation"}:
         estimator = None
@@ -1066,6 +1083,10 @@ def _rolling_test_predictions(
             for offset in range(0, len(segment), horizon):
                 block = segment[offset:offset + horizon]
                 issue_date = data.test.target_dates[block[0]] - timedelta(days=1)
+                # Water-state observations after issue time are unknown. Persist
+                # the issue-day state (and its mask) throughout this forecast.
+                issue_states = data.test.inputs[block[0], -1, state_indices].to(device)
+                issue_physical_states = data.test.physical_inputs[block[0], -1, state_indices].to(device)
                 predicted_flow: dict[date, float] = {}
                 for lead, index in enumerate(block, 1):
                     day = data.test.target_dates[index]
@@ -1081,6 +1102,9 @@ def _rolling_test_predictions(
                                 history[0, history_index, q_index] = (predicted_flow[history_date] - mean) / std
                     for sequence_index in range(normalized.shape[1]):
                         input_date = day - timedelta(days=normalized.shape[1] - sequence_index)
+                        if input_date > issue_date and state_indices:
+                            normalized[0, sequence_index, state_indices] = issue_states
+                            physical[0, sequence_index, state_indices] = issue_physical_states
                         if input_date in predicted_flow:
                             value = predicted_flow[input_date]
                             physical[0, sequence_index, q_index] = value
@@ -1119,6 +1143,8 @@ def _resolved(config: RegionalExperimentConfig, data: RegionalHydrologyData) -> 
         value["estreams_root"] = str(config.estreams_root)
     if config.camels_chem_root is not None:
         value["camels_chem_root"] = str(config.camels_chem_root)
+    if config.hyd_responses_root is not None:
+        value["hyd_responses_root"] = str(config.hyd_responses_root)
     for split in ("train", "validation", "test"):
         item = value["dates"][split]  # type: ignore[index]
         item["start"], item["end"] = str(item["start"]), str(item["end"])
@@ -1171,6 +1197,8 @@ def run_regional_experiment(
                 series[basin] = catalog.load_series(basin, full_start, full_end)  # type: ignore[arg-type]
             except (ValueError, FileNotFoundError) as error:
                 load_failures[basin] = str(error)
+    if config.camels_state_features:
+        series = augment_camels_ch_states(config.data_root, series, config.camels_state_features)
     if config.estreams_root is not None:
         series = EStreamsVegetationSnow(config.estreams_root).augment(
             series, config.estreams_features
@@ -1181,6 +1209,12 @@ def run_regional_experiment(
         )
     loaded = tuple(basin for basin in relevant if basin in series)
     attrs = {basin: catalog.get(basin).static_attributes for basin in loaded}
+    if config.hyd_responses_root is not None:
+        hyd = HYDResponses(config.hyd_responses_root)
+        series = hyd.augment(series, config.hyd_responses_features)
+        if config.hyd_responses_static:
+            physical = hyd.physical_attributes()
+            attrs = {basin: {**values, **physical.get(basin, {})} for basin, values in attrs.items()}
     scope = replace(config.basins, eligible_basins=eligible)
     data = make_regional_hydrology_data(series, attrs, scope, config.dates,
                                         sequence_length=hp.sequence_length,

@@ -24,12 +24,42 @@ regional experiments across CAMELS-CH basins, compares model approaches, and
 shows observed versus predicted flows, event scores, and a rainfall–runoff
 replay.
 
+The [custom research workspace](#custom-research-workspace) provides the main
+browser interface, with training handled by a separate API worker and the native
+Gradio interface available alongside it.
+
 The model uses CAMELS-CH simulation-based precipitation, temperature, and
 potential evapotranspiration (PET), previous observed discharge, seasonal day
 encoding, and available basin descriptors. Optional EStreams vegetation and
 snow-cover data and CAMELS-CH-Chem catchment predictors can be added. The
 ensemble can route between a complex Mamba or MLP expert and a simpler RBF or
 Fourier expert; a linear-reservoir relation provides a physics constraint.
+
+In **Data and features**, **Optional CAMELS-CH water states** lets you select
+snow water equivalent (mm) and simulated canopy interception storage (mm)
+independently. Both are read from your existing CAMELS-CH files and are off by
+default. Missing daily values use a zero placeholder with an availability
+flag, without interpolation or carrying values forward. Only historical input
+dates feed each forecast. Saved configurations, CLI reruns, and API requests
+preserve the selection in `camels_state_features`, using the names
+`snow_water_equivalent` and `canopy_interception_storage`.
+
+**HYD-RESPONSES catchment water states** in the same tab adds independently
+selectable ERA5-Land soil moisture at four depths (m³/m³), OSHD snowmelt,
+and OSHD/SPASS snow water equivalent. Enable the dataset and choose features;
+the app pre-fills a sibling `HYD_RESPONSES` directory when it exists. Use
+**Validate HYD-RESPONSES path and basin coverage** to check matching basin IDs
+and partial Swiss coverage. An additional checkbox enables physical catchment
+descriptors (terrain, soils and hydrogeology). The loader reads only base
+variables, units metadata and selected descriptors; all dataset files stay
+in place. Missing dates and unmatched basins use availability flags. Swiss
+snow features include the Swiss-area fraction for border catchments.
+
+Launch with `--hyd-responses-root ../datasets/HYD_RESPONSES` or set
+`HYD_RESPONSES_ROOT` to pre-enable the integration. Saved configurations use
+`hyd_responses_root`, `hyd_responses_features`, and `hyd_responses_static`.
+For rolling forecasts, CAMELS-CH and HYD-RESPONSES water states are held at
+their issue-day values rather than reading later state observations.
 
 The **Complexity routing method** setting in **Training hyperparameters** selects
 Morse (the default), PH, Takens, or Lyapunov for soft/hard routing and distillation.
@@ -185,6 +215,51 @@ python -m pytest -q ensemble_review/tests
 ```
 
 ## HTTP API and shared worker
+
+### Custom research workspace
+
+The custom browser frontend uses a white-to-silver gradient with sky-blue accents (`#00BFFF`).
+It shares one Python server with the HTTP API and Gradio, while a separate worker
+runs training. Catchment selection stays in the browser; map geometry is fetched
+once per dataset, charts load per catchment, and progress polling does not redraw
+the rest of the page. No Node build or frontend dependency installation is needed.
+
+```bash
+python -m pip install -e './ensemble_review[api,animations]'
+cp api-server.example.json api-server.json
+```
+
+Set the dataset paths in `api-server.json`, then run these in separate terminals:
+
+```bash
+complexity-ensemble-studio --settings api-server.json
+complexity-ensemble-worker --settings api-server.json
+```
+
+Open **http://127.0.0.1:7860**. The workspace includes experiment configuration,
+catchment selection, progress/cancellation, a run library with charts and downloads,
+comparisons, rainfall replay/GIF export, and paved-site scenarios. Configuration
+drafts are saved in browser local storage; an active job reconnects after refreshing
+the same tab. Result charts let you select a catchment and forecast lead day, with
+time series averaged across seeds. Complete predictions remain in the exports.
+
+To also use the original experiment interface at `/gradio`, add
+`--native-dataset camels-ch` to the studio command. Its training uses the same API
+and worker. The existing `complexity-ensemble-app` command remains available.
+
+For an authenticated server, set `RUNOFF_API_TOKEN` before launching the studio,
+then enter it through the workspace connection button. The token stays in tab
+session storage and is sent in request headers, including downloads. The native
+Gradio interface uses username `runoff` and that token as its password. The studio
+does not open a public share tunnel. CPU/RAM/GPU limits still apply when the worker
+shares the same machine; this UI change does not reserve training resources.
+
+Workspace checks:
+
+```bash
+node --test ensemble_review/tests/studio_core.test.mjs
+python -m unittest discover -s ensemble_review/tests -p 'test_studio.py'
+```
 
 The API exposes experiments, progress/cancellation, run comparisons, predictions,
 rainfall replay, GIF export, and paved-site scenarios. Gradio and the CLI remain

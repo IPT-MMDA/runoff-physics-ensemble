@@ -20,6 +20,7 @@ from .design import launch_style
 from .design.config_help import config_info
 from .design.dataset_help import dataset_info
 from .estreams import ESTREAMS_DYNAMIC_FEATURES
+from .hyd_responses import HYDResponses, DEFAULT_HYD_RESPONSES_FEATURES
 from .paved_scenario import PavedSiteConfig
 from .rainfall_replay import (
     export_gif, forecast_snapshot, replay_figures,
@@ -282,6 +283,7 @@ def _config_from_ui_values(
     data_root: str | Path, target_values, scope_value, values,
     *, estreams_root: str | Path | None = None,
     camels_chem_root: str | Path | None = None,
+    hyd_responses_root: str | Path | None = None,
 ):
     """Translate the ordered Gradio component values into the typed service config."""
     widths = tuple(int(item.strip()) for item in values[22].split(",") if item.strip())
@@ -364,6 +366,11 @@ def _config_from_ui_values(
         estreams_features=selected_estreams_features,
         camels_chem_root=resolved_chem_root,
         camels_chem_features=selected_chem_features,
+        camels_state_features=tuple(values[73] or ()) if len(values) > 73 else (),
+        hyd_responses_root=(str(values[75] or "").strip() if values[74] else None)
+                           if len(values) > 77 else hyd_responses_root,
+        hyd_responses_features=tuple(values[76] or ()) if len(values) > 77 else DEFAULT_HYD_RESPONSES_FEATURES,
+        hyd_responses_static=bool(values[77]) if len(values) > 77 else False,
         forecast=ForecastConfig(
             mode=values[54] if len(values) > 54 else "one_day",
             horizon_days=int(values[55]) if len(values) > 55 else 7,
@@ -376,6 +383,7 @@ def build_app(
     *,
     estreams_root: str | Path | None = None,
     camels_chem_root: str | Path | None = None,
+    hyd_responses_root: str | Path | None = None,
     save_results: bool = False,
     results_dir: str | Path = DEFAULT_RESULTS_DIRECTORY,
     executor=None,
@@ -472,6 +480,19 @@ def build_app(
             with gr.Row():
                 gr.Checkbox(True, label="CAMELS-CH daily hydrology (required)", interactive=False)
                 dataset_info(gr, "camels")
+            camels_state_features = gr.CheckboxGroup(
+                choices=[
+                    ("Snow water equivalent (mm)", "snow_water_equivalent"),
+                    ("Canopy interception storage (mm, simulated)", "canopy_interception_storage"),
+                ],
+                value=[],
+                label="Optional CAMELS-CH water states",
+            )
+            gr.Markdown(
+                "Select either or both features from the existing CAMELS-CH files. "
+                "Snow water equivalent estimates water stored in snow; canopy storage "
+                "is simulated by PREVAH. Missing daily values are marked as unavailable."
+            )
             with gr.Row():
                 use_estreams = gr.Checkbox(
                     value=estreams_root is not None,
@@ -538,6 +559,39 @@ def build_app(
             )
             validate_camels_chem = gr.Button("Validate CAMELS-CH-Chem path")
             camels_chem_status = gr.Markdown()
+            gr.Markdown("### HYD-RESPONSES catchment water states")
+            with gr.Row():
+                use_hyd_responses = gr.Checkbox(
+                    value=hyd_responses_root is not None,
+                    label="Include HYD-RESPONSES water states and descriptors",
+                )
+                dataset_info(gr, "hyd-responses")
+            nearby_hyd = Path(data_root).resolve().parent / "HYD_RESPONSES"
+            hyd_responses_path = gr.Textbox(
+                value=str(hyd_responses_root or (nearby_hyd if nearby_hyd.is_dir() else "")),
+                label="HYD-RESPONSES extracted dataset directory",
+            )
+            hyd_responses_features = gr.CheckboxGroup(
+                choices=[
+                    *[(f"Soil moisture: layer {i} (m³/m³, ERA5-Land)", f"hyd_soil_moisture_layer_{i}")
+                      for i in range(1, 5)],
+                    ("Snowmelt contributing to runoff (mm/day, OSHD)", "hyd_snowmelt_oshd"),
+                    ("Snow water equivalent (mm, OSHD)", "hyd_swe_oshd"),
+                    ("Snow water equivalent (mm, SPASS)", "hyd_swe_spass"),
+                ], value=list(DEFAULT_HYD_RESPONSES_FEATURES),
+                label="HYD-RESPONSES water-state features",
+            )
+            hyd_responses_static = gr.Checkbox(
+                False, label="Include HYD-RESPONSES physical catchment descriptors",
+            )
+            gr.Markdown(
+                "Matches existing basin IDs. Missing dates or unmatched basins are marked "
+                "unavailable. Swiss snow products can cover only part of border catchments; "
+                "the Swiss-area fraction accompanies snow features. Physical descriptors "
+                "include terrain, soils and hydrogeology."
+            )
+            validate_hyd_responses = gr.Button("Validate HYD-RESPONSES path and basin coverage")
+            hyd_responses_status = gr.Markdown()
         with gr.Tab("Rainfall–runoff replay"):
             gr.Markdown(
                 "## Follow a CAMELS-CH rainfall episode to a discharge prediction\n"
@@ -891,6 +945,30 @@ the leaderboard lets you revisit and compare saved runs.
             validate_camels_chem_path, inputs=camels_chem_path,
             outputs=camels_chem_status, queue=False,
         )
+        def validate_hyd_responses_path(path, selected):
+            if not str(path or "").strip():
+                return "Enter a HYD-RESPONSES dataset directory first."
+            try:
+                hyd = HYDResponses(path)
+                available = set(hyd.gauge_ids)
+                matching = available & set(catalog.eligible_ids)
+                missing = set(selected or ()) - available
+                partial = [basin for basin in selected or ()
+                           if basin in hyd.stations
+                           and float(hyd.stations[basin].get("percentage_overlap_CH") or 0) < 95]
+                message = f"Valid HYD-RESPONSES layout; {len(matching)} eligible CAMELS-CH basin IDs match directly."
+                if missing:
+                    message += " Selected basins without HYD-RESPONSES data: " + ", ".join(sorted(missing)) + "."
+                if partial:
+                    message += " Check partial Swiss snow coverage for: " + ", ".join(partial) + "."
+                return message
+            except (OSError, ValueError, KeyError) as error:
+                return f"HYD-RESPONSES validation failed: {error}"
+
+        validate_hyd_responses.click(
+            validate_hyd_responses_path, inputs=[hyd_responses_path, targets],
+            outputs=hyd_responses_status, queue=False,
+        )
 
         def _selector_updates(values):
             selections = {
@@ -1226,6 +1304,7 @@ the leaderboard lets you revisit and compare saved runs.
                     data_root, target_values, scope_value, values[:-10],
                     estreams_root=estreams_root,
                     camels_chem_root=camels_chem_root,
+                    hyd_responses_root=hyd_responses_root,
                 )
                 result=execute_experiment(
                     config, lambda fraction,message: progress(fraction,desc=message), token, executor=executor
@@ -1303,7 +1382,7 @@ the leaderboard lets you revisit and compare saved runs.
         def refresh_result_views(basin, result):
             return refresh_result(basin, result)[1:]
 
-        inputs=[targets,scope,train_start,train_end,val_start,val_end,test_start,test_end,approach,complex_expert,simple_expert,epochs,sequence,seeds,batch,learning_rate,noise,percentile,temperature,physics_weight,interface_weight,teacher_epochs,distill_epochs,consolidation_epochs,mlp_widths,mamba_hidden,mamba_layers,mamba_ff,rbf_centers,fourier_frequencies,extreme_mode,routing_weight,compute_weight,device,definition,extreme_value,ood_quantile,ood_shrinkage,physics_optimization,physics_teacher,kan_candidates,kan_steps,kan_grid,kan_order,kan_additive,kan_multiplicative,kan_sparsity,kan_noise_levels,kan_accuracy_tolerance,kan_symbolic,use_estreams,estreams_path,estreams_features,use_camels_chem,camels_chem_path,camels_chem_features,forecast_mode,horizon_days,event_types,high_quantile,low_quantile,rise_quantile,minimum_days,pulse_gap_days,minimum_basins,fall_quantile,complexity_method,routing_context,embedding_dim,embedding_delay,ph_min_persistence,ph_score,lyapunov_theiler,lyapunov_horizon,lyapunov_r2]
+        inputs=[targets,scope,train_start,train_end,val_start,val_end,test_start,test_end,approach,complex_expert,simple_expert,epochs,sequence,seeds,batch,learning_rate,noise,percentile,temperature,physics_weight,interface_weight,teacher_epochs,distill_epochs,consolidation_epochs,mlp_widths,mamba_hidden,mamba_layers,mamba_ff,rbf_centers,fourier_frequencies,extreme_mode,routing_weight,compute_weight,device,definition,extreme_value,ood_quantile,ood_shrinkage,physics_optimization,physics_teacher,kan_candidates,kan_steps,kan_grid,kan_order,kan_additive,kan_multiplicative,kan_sparsity,kan_noise_levels,kan_accuracy_tolerance,kan_symbolic,use_estreams,estreams_path,estreams_features,use_camels_chem,camels_chem_path,camels_chem_features,forecast_mode,horizon_days,event_types,high_quantile,low_quantile,rise_quantile,minimum_days,pulse_gap_days,minimum_basins,fall_quantile,complexity_method,routing_context,embedding_dim,embedding_delay,ph_min_persistence,ph_score,lyapunov_theiler,lyapunov_horizon,lyapunov_r2,camels_state_features,use_hyd_responses,hyd_responses_path,hyd_responses_features,hyd_responses_static]
         prepare = run.click(lambda: CancellationToken(), outputs=token_state, queue=False)
         scenario_prepare = run_scenario_experiment.click(
             lambda: (CancellationToken(), True),
@@ -1351,6 +1430,8 @@ def main() -> None:
         help="Read CAMELS-CH-Chem pressures from this extracted dataset directory",
     )
     parser.add_argument("--host",default="127.0.0.1"); parser.add_argument("--port",type=int,default=7860)
+    parser.add_argument("--hyd-responses-root", type=Path, default=os.environ.get("HYD_RESPONSES_ROOT"),
+                        help="Read HYD-RESPONSES base water states from this extracted directory")
     parser.add_argument(
         "--save-results", type=parse_bool, default=False, metavar="true|false",
         help="Persist completed runs in the shared leaderboard registry (default: false)",
@@ -1373,6 +1454,7 @@ def main() -> None:
     build_app(
         args.data_root, estreams_root=args.estreams_root,
         camels_chem_root=args.camels_chem_root,
+        hyd_responses_root=args.hyd_responses_root,
         save_results=args.save_results, results_dir=args.results_dir, executor=executor,
     ).launch(server_name=args.host,server_port=args.port,share=True,**launch_style())
 

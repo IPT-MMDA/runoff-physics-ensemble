@@ -14,6 +14,7 @@ from .regional import (BasinScopeConfig, HyperparameterConfig, ModelArchitecture
                        TrainingStrategyConfig, PhysicsModelConfig, ExtremeEventConfig, ForecastConfig)
 from .estreams import ESTREAMS_DYNAMIC_FEATURES
 from .camels_ch_chem import DEFAULT_CAMELS_CH_CHEM_FEATURES
+from .hyd_responses import DEFAULT_HYD_RESPONSES_FEATURES
 
 
 class Contract(BaseModel):
@@ -78,6 +79,9 @@ class ExperimentConfiguration(Contract):
     forecast: Forecast = Field(default_factory=Forecast)
     estreams_features: tuple[str, ...] = ESTREAMS_DYNAMIC_FEATURES
     camels_chem_features: tuple[str, ...] = DEFAULT_CAMELS_CH_CHEM_FEATURES
+    camels_state_features: tuple[str, ...] = ()
+    hyd_responses_features: tuple[str, ...] = DEFAULT_HYD_RESPONSES_FEATURES
+    hyd_responses_static: StrictBool = False
 
 
 class ExperimentRequest(Contract):
@@ -85,6 +89,7 @@ class ExperimentRequest(Contract):
     config: ExperimentConfiguration
     use_estreams: StrictBool = False
     use_camels_chem: StrictBool = False
+    use_hyd_responses: StrictBool = False
     save_to_leaderboard: StrictBool = False
 
 

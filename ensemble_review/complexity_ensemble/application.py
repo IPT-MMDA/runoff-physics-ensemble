@@ -26,13 +26,14 @@ class Application:
     def experiment_config(self, payload, *, check_data=True):
         registration = self.registration(payload["dataset_id"])
         cfg = payload["config"]
-        for kind in ("estreams", "camels_chem"):
+        for kind in ("estreams", "camels_chem", "hyd_responses"):
             if payload.get("use_" + kind) and getattr(registration, kind + "_root") is None:
                 raise ValueError(f"optional {kind} dataset is not configured")
         config = config_from_mapping(
             cfg, data_root=registration.data_root,
             estreams_root=registration.estreams_root if payload.get("use_estreams") else None,
             camels_chem_root=registration.camels_chem_root if payload.get("use_camels_chem") else None,
+            hyd_responses_root=registration.hyd_responses_root if payload.get("use_hyd_responses") else None,
         )
         config.validate()
         resolve_device(config.hyperparameters.device)
@@ -45,7 +46,7 @@ class Application:
                 raise ValueError("target basins must be eligible basins in this dataset")
             if config.basins.eligible_basins is not None and set(config.basins.eligible_basins) - eligible:
                 raise ValueError("eligible_basins contains unavailable basins")
-            for kind in ("estreams", "camels_chem"):
+            for kind in ("estreams", "camels_chem", "hyd_responses"):
                 if payload.get("use_" + kind):
                     validate_optional_dataset(kind, getattr(registration, kind + "_root"))
         return config

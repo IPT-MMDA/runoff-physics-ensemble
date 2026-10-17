@@ -7,6 +7,7 @@ from typing import Mapping, TypeVar
 
 from .camels_ch_chem import DEFAULT_CAMELS_CH_CHEM_FEATURES
 from .estreams import ESTREAMS_DYNAMIC_FEATURES
+from .hyd_responses import DEFAULT_HYD_RESPONSES_FEATURES
 from .regional import (
     BasinScopeConfig, DateRange, DateSplitConfig, ExtremeEventConfig, ForecastConfig,
     HyperparameterConfig, ModelArchitectureConfig, PhysicsModelConfig,
@@ -31,6 +32,7 @@ def config_from_mapping(
     value: Mapping[str, object], *, data_root: str | Path | None = None,
     estreams_root: str | Path | None = None,
     camels_chem_root: str | Path | None = None,
+    hyd_responses_root: str | Path | None = None,
 ) -> RegionalExperimentConfig:
     """Build the typed service configuration from saved/resolved JSON."""
     try:
@@ -66,6 +68,16 @@ def config_from_mapping(
         camels_chem_root if camels_chem_root is not None else value.get("camels_chem_root")
     )
     chem_features = value.get("camels_chem_features", DEFAULT_CAMELS_CH_CHEM_FEATURES)
+    state_features = value.get("camels_state_features", ())
+    resolved_hyd = hyd_responses_root if hyd_responses_root is not None else value.get("hyd_responses_root")
+    hyd_features = value.get("hyd_responses_features", DEFAULT_HYD_RESPONSES_FEATURES)
+    if not isinstance(hyd_features, (list, tuple)):
+        raise ValueError("hyd_responses_features must be a list of feature names")
+    hyd_static = value.get("hyd_responses_static", False)
+    if not isinstance(hyd_static, bool):
+        raise ValueError("hyd_responses_static must be a boolean")
+    if not isinstance(state_features, (list, tuple)):
+        raise ValueError("camels_state_features must be a list of feature names")
     return RegionalExperimentConfig(
         resolved_root,
         BasinScopeConfig(
@@ -92,6 +104,10 @@ def config_from_mapping(
             else DEFAULT_CAMELS_CH_CHEM_FEATURES
         ),
         forecast=ForecastConfig(**_dataclass_values(ForecastConfig, section("forecast"))),
+        camels_state_features=tuple(map(str, state_features)),
+        hyd_responses_root=resolved_hyd if resolved_hyd not in (None, "") else None,
+        hyd_responses_features=tuple(map(str, hyd_features)),
+        hyd_responses_static=hyd_static,
     )
 
 

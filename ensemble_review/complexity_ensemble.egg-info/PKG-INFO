@@ -2,6 +2,7 @@ Metadata-Version: 2.4
 Name: complexity-ensemble
 Version: 0.1.0
 Summary: Morse-routed heterogeneous ensembles for PINNs and neural differential equations
+License: Proprietary. All rights reserved. Any use requires prior written notice and express written permission; commercial use requires a separate prior written agreement. See the repository LICENSE.
 Requires-Python: >=3.10
 Requires-Dist: matplotlib
 Requires-Dist: numpy

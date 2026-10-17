@@ -5,10 +5,12 @@ complexity_ensemble/api_models.py
 complexity_ensemble/app.py
 complexity_ensemble/application.py
 complexity_ensemble/camels_ch_chem.py
+complexity_ensemble/camels_ch_states.py
 complexity_ensemble/configuration.py
 complexity_ensemble/devices.py
 complexity_ensemble/estreams.py
 complexity_ensemble/experts.py
+complexity_ensemble/hyd_responses.py
 complexity_ensemble/hydrology.py
 complexity_ensemble/hydrology_comparison.py
 complexity_ensemble/hydrology_complexity.py
@@ -34,6 +36,7 @@ complexity_ensemble/serialization.py
 complexity_ensemble/server_settings.py
 complexity_ensemble/services.py
 complexity_ensemble/stacking.py
+complexity_ensemble/studio_server.py
 complexity_ensemble/visualization.py
 complexity_ensemble/worker.py
 complexity_ensemble.egg-info/PKG-INFO
@@ -46,9 +49,16 @@ complexity_ensemble/design/__init__.py
 complexity_ensemble/design/config_help.py
 complexity_ensemble/design/dataset_help.py
 complexity_ensemble/design/loading.css
+complexity_ensemble/studio/app.js
+complexity_ensemble/studio/charts.js
+complexity_ensemble/studio/core.js
+complexity_ensemble/studio/index.html
+complexity_ensemble/studio/style.css
 tests/test_api.py
+tests/test_camels_ch_states.py
 tests/test_complexity_routing.py
 tests/test_devices.py
+tests/test_hyd_responses.py
 tests/test_hydrology.py
 tests/test_hydrology_complexity.py
 tests/test_hydrology_consolidation.py
@@ -65,3 +75,4 @@ tests/test_rainfall_replay.py
 tests/test_regional.py
 tests/test_result_registry.py
 tests/test_stacking.py
+tests/test_studio.py

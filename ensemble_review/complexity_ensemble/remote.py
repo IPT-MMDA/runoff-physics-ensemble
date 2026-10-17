@@ -66,7 +66,8 @@ class RemoteExecutor:
         from .services import _prediction
         request = {"dataset_id": self.dataset_id, "config": public_config(config),
                    "use_estreams": config.estreams_root is not None,
-                   "use_camels_chem": config.camels_chem_root is not None}
+                   "use_camels_chem": config.camels_chem_root is not None,
+                   "use_hyd_responses": config.hyd_responses_root is not None}
         job = self.request("POST", "/experiments", request, key=uuid.uuid4().hex)
         if progress:
             progress(0., f"Submitted remote job {job['job_id']}")

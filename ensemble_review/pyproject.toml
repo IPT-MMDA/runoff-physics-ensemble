@@ -15,9 +15,10 @@ complexity-ensemble-app = "complexity_ensemble.app:main"
 complexity-ensemble-run = "complexity_ensemble.regional_cli:main"
 complexity-ensemble-api = "complexity_ensemble.api:main"
 complexity-ensemble-worker = "complexity_ensemble.worker:main"
+complexity-ensemble-studio = "complexity_ensemble.studio_server:main"
 
 [tool.setuptools.package-data]
-complexity_ensemble = ["design/*.css"]
+complexity_ensemble = ["design/*.css", "studio/*.html", "studio/*.css", "studio/*.js"]
 
 [tool.setuptools.packages.find]
 include = ["complexity_ensemble*"]

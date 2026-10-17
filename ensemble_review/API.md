@@ -15,7 +15,7 @@ cp api-server.example.json api-server.json
 
 Edit `api-server.json` to register the extracted datasets on the server. Paths
 are resolved relative to the settings file, except absolute paths. Optional
-`estreams_root` and `camels_chem_root` may be registered under each dataset.
+`estreams_root`, `camels_chem_root`, and `hyd_responses_root` may be registered under each dataset.
 Clients refer to the dataset ID (`camels-ch` in this example), not these paths.
 Do not commit credentials or a machine-specific settings file.
 
@@ -79,6 +79,14 @@ extreme-event and forecast options are documented in OpenAPI. Unknown fields
 are rejected, including nested misspellings. Numbers must be JSON numbers;
 NaN and infinity are rejected. Optional feature selections use
 `config.estreams_features` and `config.camels_chem_features`.
+
+HYD-RESPONSES is another optional registered dataset. Add `hyd_responses_root`
+to the server dataset settings, then set `use_hyd_responses: true` in requests.
+Choose `config.hyd_responses_features` from `hyd_soil_moisture_layer_1` through
+`hyd_soil_moisture_layer_4`, `hyd_snowmelt_oshd`, `hyd_swe_oshd`, and
+`hyd_swe_spass`. Set `config.hyd_responses_static: true` to add physical
+catchment descriptors. Soil moisture uses m³/m³; missing data are masked.
+The `/datasets/{dataset_id}/features` endpoint lists available selections.
 
 Complexity routing is selected through `config.hyperparameters.complexity_method`:
 `morse` (default), `ph`, `takens`, or `lyapunov`. The older experimental name

@@ -20,6 +20,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, required=True, help="Regional experiment JSON")
     parser.add_argument("--data-root", type=Path, help="Override data_root from the JSON file")
     parser.add_argument("--device", choices=DEVICE_CHOICES, help="Override the configured training device")
+    parser.add_argument("--hyd-responses-root", type=Path,
+                        help="Override HYD-RESPONSES extracted dataset directory")
     parser.add_argument(
         "--estreams-root", type=Path,
         help="Read EStreams vegetation and snow from this extracted dataset directory",
@@ -57,6 +59,7 @@ def main() -> None:
         config = config_from_mapping(
             raw, data_root=args.data_root, estreams_root=args.estreams_root,
             camels_chem_root=args.camels_chem_root,
+            hyd_responses_root=args.hyd_responses_root,
         )
         if args.device is not None:
             config = replace(config, hyperparameters=replace(config.hyperparameters, device=args.device))

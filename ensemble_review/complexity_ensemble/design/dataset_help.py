@@ -2,6 +2,16 @@
 
 
 _DATASET_HELP = {
+    "hyd-responses": (
+        "HYD-RESPONSES water states",
+        "Adds selected daily soil moisture, snowmelt and snow water equivalent "
+        "from base variables matched by catchment ID. Missing data are marked. "
+        "Soil moisture is reanalysis output; snow states are model estimates. "
+        "Swiss snow products have partial coverage in some border catchments.",
+        "The target remains daily discharge. Optional physical descriptors add "
+        "terrain, soil and hydrogeological context. Anomalies, drought indices, "
+        "centred flow averages and discharge-derived descriptors are excluded.",
+    ),
     "camels": (
         "CAMELS-CH daily hydrology",
         "Provides the required daily hydrology inputs, observed discharge, and basin "

@@ -1,4 +1,4 @@
-import { allPages, coerce, finite, format, meanByDate, pretty, terminal } from "./core.js";
+import { allPages, basinAvailability, basinCompatibilityLoaded, coerce, finite, format, meanByDate, pretty, terminal, useBenchmarkCoverage } from "./core.js";
 import { BasinAtlas, chart } from "./charts.js?v=fixed-sky-blue-1";
 
 const $ = selector => document.querySelector(selector);
@@ -42,18 +42,26 @@ function setConnection(connected, label) {
   $("#connection").classList.toggle("ready", connected); $("#connection").classList.toggle("error", !connected);
   updateLaunch();
 }
-function updateLaunch() { $("#launch").disabled = !state.connected || !state.selected.size || !state.config || state.submitting || Boolean(state.job && !terminal(state.job.status)); }
+function updateLaunch() { $("#launch").disabled = !state.connected || !state.selected.size || !state.config || state.submitting || state.basinsDataset !== $("#dataset").value || !basinCompatibilityLoaded(state.basins, state.config?.benchmark.mode) || Boolean(state.job && !terminal(state.job.status)); }
 function option(value, label = value) { return el("option", { value, text: label }); }
 function setOptions(node, values, previous = node.value) { node.replaceChildren(...values.map(v => option(v.value ?? v, v.label ?? v))); if ([...node.options].some(o => o.value === previous)) node.value = previous; }
 function resolve(schema) { return schema?.$ref ? state.bootstrap.schema.$defs[schema.$ref.split("/").at(-1)] : schema; }
 function schemaFor(section) { return resolve(resolve(state.bootstrap.schema.properties.config).properties[section]); }
 const choices = {
-  complex_expert: ["pinnmamba", "mlp"], simple_expert: ["rbf", "fourier"],
-  approach: ["soft_routing", "hard_routing", "distillation", "no_routing", "static_50_50", "ood_fallback", "stacking"],
+  complex_expert: ["pinnmamba", "mlp", "lstm"], simple_expert: ["rbf", "fourier"],
+  approach: ["soft_routing", "hard_routing", "distillation", "no_routing", "static_50_50", "ood_fallback", "stacking", "persistence", "seasonal_climatology"],
   device: ["cpu", "cuda", "mps", "auto"], mode: [], optimization_mode: ["none", "accuracy", "robustness", "balanced", "distillation"],
-  distillation_teacher: ["soft_routing", "hard_routing", "distillation", "no_routing", "static_50_50", "ood_fallback", "stacking"], definition: ["automatic_q95", "absolute", "quantile"], name: ["linear_reservoir"],
+  distillation_teacher: ["soft_routing", "hard_routing", "distillation", "no_routing", "static_50_50", "ood_fallback", "stacking"], definition: ["automatic_q95", "absolute", "quantile"],
+  drought_definition: ["seasonal_quantile", "q347"], drought_smoothing: ["trailing", "centered"], name: ["linear_reservoir"],
 };
 const hints = {
+  expected_evaluation_fingerprint: "Optional: pin the cohort and evaluation task after preflight. A changed target, date coverage, threshold or forecast policy then stops execution before training.",
+  strict_cohort: "Require every requested training and target station to have usable windows. Preflight reports exclusions without submitting a job.",
+  drought_definition: "Drought task only. Training-fitted seasonal percentile of seven-day mean flow, or a fixed Q347 estimate from raw daily flow.",
+  drought_smoothing: "Trailing uses current and six earlier days. Centred requires rolling mode and horizon >= 4; final three leads cannot be scored.",
+  drought_quantile: "Seasonal definition only; estimated from training data, never test observations.",
+  drought_calendar_window: "Seasonal definition only: odd calendar-day window, including year wraparound.",
+  drought_minimum_days: "Minimum below-threshold spell length. Events are matched one-to-one within each issue; boundary events are censored.",
   seeds: "Comma-separated random seeds, e.g. 0, 1, 2.", mlp_widths: "Hidden layer widths, separated by commas.",
   routing_context_length: "Historical days used to estimate catchment complexity.", sequence_length: "Days of input history for each prediction.",
   complexity_method: "Morse routing or a history-based complexity estimator.", physics_weight: "Weight of the physics constraint in training.",
@@ -85,7 +93,47 @@ function renderConfig() {
   for (const [group, keys] of [["strategy", ["approach", "epochs"]], ["model", ["complex_expert", "simple_expert"]], ["hyperparameters", ["sequence_length", "batch_size", "learning_rate", "device"]]]) {
     for (const key of keys) field(essential, key, state.config[group][key], schemaFor(group).properties[key], [group, key], state.bindings, key === "device" ? state.capabilities.device_choices : undefined);
   }
-  const dates = section("Date splits", "02");
+  const benchmark = section("BAFU benchmark", "02", true);
+  benchmark.append(el("p", { class: "field-full field-hint", text: "Compare BAFU-only and combined predictors on the same target stations and dates. BAFU-only requires physics weight 0 and excludes optional predictors. A reference LSTM is available under No routing. Preflight reads data without starting training." }));
+  for (const [key, schema] of Object.entries(schemaFor("benchmark").properties)) {
+    if (key === "mode") continue;
+    const input = field(benchmark, key, state.config.benchmark?.[key] ?? schema.default, schema, ["benchmark", key], state.bindings);
+    if (key === "target") input.addEventListener("change", action(() => changeSource()));
+  }
+  benchmark.append(el("button", { type: "button", class: "button secondary", text: "Check benchmark coverage", onclick: action(async () => {
+    const checkedBody = requestBody(), checkedSnapshot = JSON.stringify(checkedBody);
+    notice("Checking BAFU stations and date windows…", false, true);
+    const output = await api("/experiments/preflight", { method: "POST", body: checkedBody });
+    const node = $("#benchmark-report"), report = output.manifest;
+    node.replaceChildren(el("p", { text: `${output.valid ? "Ready" : "Incomplete cohort"} · ${report.effective_targets.length} target stations · ${report.forecast_interpretation}` }));
+    renderTable(node, Object.entries(report.samples).map(([split, samples]) => ({ split, samples })));
+    renderTable(node, Object.entries(report.thresholds_mm_day).map(([station, threshold]) => ({ station, threshold_mm_day: threshold })));
+    if (Object.keys(report.excluded_basins).length || report.provenance.missing_stations?.length) {
+      const excluded = el("div"); node.append(excluded); renderData(excluded, { excluded: report.excluded_basins, missing: report.provenance.missing_stations });
+      if (report.effective_targets.length && report.training_basins.length) node.append(el("button", {
+        type: "button", class: "button secondary", text: "Use stations with complete coverage", onclick: action(() => {
+          if (JSON.stringify(requestBody()) !== checkedSnapshot) throw new Error("The setup changed. Check benchmark coverage again before applying these stations.");
+          state.config = useBenchmarkCoverage(checkedBody.config, report);
+          state.selected = new Set(state.config.basins.target_basins);
+          state.flags = checkedBody;
+          renderConfig(); selectionChanged(); renderBasinList();
+          notice(`Selected ${report.effective_targets.length} target stations and ${report.training_basins.length} training stations with usable windows. Run the experiment when ready.`, false, true);
+        }),
+      }));
+    }
+    node.append(el("button", { type: "button", class: "text-button", text: "Download benchmark audit", onclick: () => downloadBlob(new Blob([JSON.stringify(output, null, 2)], { type: "application/json" }), "benchmark-audit.json") }));
+    if (output.valid) node.append(el("button", { type: "button", class: "text-button", text: "Pin this evaluation for future runs", onclick: action(() => {
+      $("#field-benchmark-expected_evaluation_fingerprint").value = report.evaluation_fingerprint;
+      persistDraft(); notice("Evaluation pinned. Future runs must match its target observations, dates, thresholds and forecast setup.", false, true);
+    }) }));
+    notice(output.valid ? "Benchmark preflight complete. No experiment was submitted." : "Review the exclusions, then choose Use stations with complete coverage or adjust your dates.", !output.valid, true);
+  }) }), el("button", { type: "button", class: "button secondary", text: "Inspect flood statistics", onclick: action(async () => {
+    const output = await api(`/datasets/${encodeURIComponent($("#dataset").value)}/bafu/statistics`);
+    $("#benchmark-report").replaceChildren(); renderData($("#benchmark-report"), output);
+  }) }), el("button", { type: "button", class: "button secondary", text: "Published comparison protocol", onclick: action(async () => {
+    const output = await api("/benchmarks"); $("#benchmark-report").replaceChildren(); renderData($("#benchmark-report"), output);
+  }) }), el("div", { id: "benchmark-report", class: "field-full" }));
+  const dates = section("Date splits", "03");
   for (const [group, range] of Object.entries(state.config.dates)) for (const [key, value] of Object.entries(range)) {
     const input = field(dates, `${group} ${key}`, value, { type: "string" }, ["dates", group, key], state.bindings); input.type = "date";
   }
@@ -93,12 +141,14 @@ function renderConfig() {
     strategy: ["approach", "epochs"], model: ["complex_expert", "simple_expert"],
     hyperparameters: ["sequence_length", "batch_size", "learning_rate", "device"],
   };
-  let n = 3;
+  let n = 4;
   for (const [group, title] of [["hyperparameters", "Routing & hyperparameters"], ["model", "Model architecture"], ["strategy", "Training phases"], ["physics", "Physics & KAN"], ["extremes", "Extreme events"], ["forecast", "Forecasting"]]) {
     const grid = section(title, String(n++).padStart(2, "0"));
+    if (group === "extremes") grid.append(el("p", { class: "field-full field-hint", text:
+      "Drought mode uses HYD-RESPONSES-style definitions with training-fitted thresholds on the experiment's observed discharge. Water-state predictors are optional and selected separately below. Drought day, event and metric CSVs are included in the run archive. Existing event modes keep their original scoring." }));
     for (const [key, schema] of Object.entries(schemaFor(group).properties)) {
       if (remaining[group]?.includes(key)) continue;
-      const options = key === "mode" ? group === "forecast" ? ["one_day", "rolling"] : ["none", "statistical", "event_based"] : undefined;
+      const options = key === "mode" ? group === "forecast" ? ["one_day", "rolling"] : ["none", "statistical", "event_based", "drought"] : undefined;
       field(grid, key, state.config[group][key] ?? schema.default, schema, [group, key], state.bindings, options);
     }
   }
@@ -106,13 +156,51 @@ function renderConfig() {
   const dataset = state.datasets.find(d => d.dataset_id === $("#dataset").value);
   for (const kind of ["estreams", "camels_chem", "hyd_responses"]) {
     const input = field(extras, `use_${kind}`, state.flags?.[`use_${kind}`] || false, { type: "boolean" }, [`use_${kind}`], state.flagBindings);
-    input.disabled = !dataset?.[`${kind}_configured`]; if (input.disabled) input.checked = false;
+    input.disabled = !dataset?.[`${kind}_configured`] || state.config.benchmark.mode === "bafu_only"; if (input.disabled) input.checked = false;
   }
   const rootProperties = resolve(state.bootstrap.schema.properties.config).properties;
   for (const key of ["estreams_features", "camels_chem_features", "camels_state_features", "hyd_responses_features", "hyd_responses_static"]) {
     field(extras, key, state.config[key] ?? rootProperties[key].default ?? [], rootProperties[key], [key], state.bindings);
   }
   $("#scope").value = state.config.basins.training_scope;
+  $("#data-source").value = state.config.benchmark.mode;
+  for (const opt of $("#data-source").options) opt.disabled = opt.value !== "none" && !dataset?.bafu_configured;
+  refreshAvailability();
+}
+function changeSource(mode = $("#data-source").value) {
+  const body = requestBody(); state.config = body.config; state.flags = body;
+  state.config.benchmark.mode = mode;
+  if (mode !== "none") state.config.extremes.mode = "statistical";
+  if (mode === "bafu_only" || (mode !== "none" && state.config.benchmark.target === "daily_max")) {
+    state.config.hyperparameters.physics_weight = 0; state.config.physics.optimization_mode = "none";
+  }
+  if (mode === "bafu_only") {
+    for (const kind of ["estreams", "camels_chem", "hyd_responses"]) state.flags[`use_${kind}`] = false;
+    state.config.camels_state_features = []; state.config.hyd_responses_static = false;
+  }
+  renderConfig(); persistDraft();
+}
+function refreshAvailability() {
+  if (state.basinsDataset !== $("#dataset").value) return;
+  const mode = state.config?.benchmark.mode || "none";
+  const rows = state.basins.map(row => ({ ...row, ...basinAvailability(row, mode) }));
+  if (!basinCompatibilityLoaded(state.basins, mode)) {
+    atlas.setData(rows); renderBasinList(); updateLaunch();
+    $("#source-hint").textContent = "The server did not return BAFU compatibility data. Restart the studio server, then refresh this page. Your catchment selections are preserved.";
+    return;
+  }
+  const eligible = new Set(rows.filter(row => row.eligible).map(row => row.basin_id));
+  const removed = [...state.selected].filter(id => !eligible.has(id));
+  state.selected = new Set([...state.selected].filter(id => eligible.has(id)));
+  atlas.setData(rows); renderBasinList(); selectionChanged();
+  $("#source-hint").textContent = `${eligible.size} compatible catchments. ` + (mode === "none"
+    ? "CAMELS observations and predictors."
+    : "Station metadata checked. Daily discharge and date windows are checked before training; use Check benchmark coverage for details.")
+    + (removed.length ? ` Removed ${removed.length} incompatible selections.` : "");
+  if (mode !== "none" && rows.length && !eligible.size) {
+    const reasons = [...new Set(rows.flatMap(row => row.reasons))];
+    $("#source-hint").textContent = `No compatible catchments: ${reasons.join("; ")}. Review the disabled catchments below and the dataset settings.`;
+  }
 }
 function readBindings(base, bindings) {
   for (const { path, input, schema } of bindings) {
@@ -133,10 +221,11 @@ const atlas = new BasinAtlas($("#basin-map"), id => { state.selected.has(id) ? s
 function selectionChanged() { $("#basin-count").textContent = `${state.selected.size} selected`; atlas.setSelected(state.selected); updateLaunch(); persistDraft(); }
 function renderBasinList() {
   const query = $("#basin-search").value.toLowerCase();
-  const rows = state.basins.filter(r => r.eligible && `${r.basin_id} ${r.name || ""}`.toLowerCase().includes(query));
+  const rows = state.basins.filter(r => `${r.basin_id} ${r.name || ""}`.toLowerCase().includes(query));
   $("#basin-list").replaceChildren(...rows.map(row => {
-    const input = el("input", { type: "checkbox", checked: state.selected.has(row.basin_id), value: row.basin_id, onChange: () => { input.checked ? state.selected.add(row.basin_id) : state.selected.delete(row.basin_id); selectionChanged(); } });
-    return el("label", { class: "basin-choice", title: `${row.basin_id} · ${row.name || ""}` }, input, el("span", { text: `${row.basin_id}${row.name ? " · " + row.name : ""}` }));
+    const availability = basinAvailability(row, state.config?.benchmark.mode);
+    const input = el("input", { type: "checkbox", disabled: !availability.eligible, checked: state.selected.has(row.basin_id), value: row.basin_id, onChange: () => { input.checked ? state.selected.add(row.basin_id) : state.selected.delete(row.basin_id); selectionChanged(); } });
+    return el("label", { class: "basin-choice", title: availability.reasons.join("; ") || `${row.basin_id} · ${row.name || ""}` }, input, el("span", { text: `${row.basin_id}${row.name ? " · " + row.name : ""}${availability.eligible ? "" : " · " + availability.reasons.join("; ")}` }));
   }));
   if (!rows.length) $("#basin-list").append(el("p", { class: "subtle", text: state.basins.length ? "No matching eligible catchments." : "No catchments loaded." }));
 }
@@ -149,10 +238,8 @@ async function loadDataset({ retain = false } = {}) {
   try {
     const rows = state.datasetCache.get(id) || await allPages((offset, limit) => api(`/datasets/${encodeURIComponent(id)}/basins?offset=${offset}&limit=${limit}`));
     if (version !== state.datasetVersion) return;
-    state.datasetCache.set(id, rows); state.basins = rows;
-    const eligible = new Set(rows.filter(r => r.eligible).map(r => r.basin_id));
-    state.selected = new Set([...state.selected].filter(id => eligible.has(id)));
-    atlas.setData(rows); renderBasinList(); selectionChanged();
+    state.datasetCache.set(id, rows); state.basins = rows; state.basinsDataset = id;
+    refreshAvailability();
     $("#map-empty").hidden = rows.some(r => r.geometry);
     $("#map-empty").textContent = "Map geometry is unavailable.\nSelect catchments from the list below.";
   } catch (error) {
@@ -195,6 +282,7 @@ async function healthCheck() {
 function ensureNoJob() { if (state.submitting || (state.job && !terminal(state.job.status))) throw new Error("A job is already being tracked. Wait for it to finish or cancel it before submitting another."); }
 async function submitJob(path, body) {
   ensureNoJob(); state.submitting = true; updateLaunch();
+  if (path === "/experiments" && body.config.benchmark.mode !== "none") notice("Checking BAFU date coverage before queueing…", false, true);
   try { trackJob(await api(path, { method: "POST", body, idempotency: true })); }
   finally { state.submitting = false; updateLaunch(); }
 }
@@ -271,6 +359,7 @@ async function loadRuns(append = false) {
 async function openRun(id) {
   const version = ++state.resultVersion;
   const run = await api(`/runs/${encodeURIComponent(id)}`); if (version !== state.resultVersion) return;
+  for (const name of ["benchmark_manifest", "flood_metrics"]) document.querySelector(`[data-download="${name}"]`).hidden = !run.config.benchmark_manifest;
   state.run = run; $("#run-detail").hidden = false; $("#detail-id").textContent = run.run_id;
   const basinIds = run.config.basins?.target_basins || Object.keys(run.per_basin_metrics);
   setOptions($("#result-basin"), basinIds);
@@ -333,13 +422,14 @@ bind("#connection", "click", () => { $("#api-token").value = state.token; $("#co
 bind("#close-connection", "click", () => $("#connection-dialog").close());
 bind("#connection-form", "submit", async event => { event.preventDefault(); state.token = $("#api-token").value.trim(); sessionStorage.setItem("runoff.token", state.token); state.datasetCache.clear(); state.predictions.clear(); await connect(); $("#connection-dialog").close(); });
 bind("#dataset", "change", () => loadDataset());
+bind("#data-source", "change", () => changeSource());
 bind("#basin-search", "input", renderBasinList);
 bind("#scope", "change", () => { if (state.config) state.config.basins.training_scope = $("#scope").value; persistDraft(); });
 bind("#save-leaderboard", "change", persistDraft);
-bind("#select-all", "click", () => { state.selected = new Set(state.basins.filter(r => r.eligible).map(r => r.basin_id)); selectionChanged(); renderBasinList(); });
+bind("#select-all", "click", () => { state.selected = new Set(state.basins.filter(r => basinAvailability(r, state.config?.benchmark.mode).eligible).map(r => r.basin_id)); selectionChanged(); renderBasinList(); });
 bind("#clear-basins", "click", () => { state.selected.clear(); selectionChanged(); renderBasinList(); });
 bind("#validate-dataset", "click", async () => { const result = await api(`/datasets/${encodeURIComponent($("#dataset").value)}/validation`); notice(`Dataset verified. ${result.eligible_basins} eligible catchments.`, false, true); });
-bind("#validate-config", "click", async () => { const result = await api("/experiments/validate", { method: "POST", body: requestBody() }); notice(result.valid ? `Setup checked. ${result.data_check}` : "Review the setup."); });
+bind("#validate-config", "click", async () => { notice("Checking setup and data coverage…", false, true); const result = await api("/experiments/validate", { method: "POST", body: requestBody() }); notice(result.valid ? `Setup checked. ${result.data_check}` : "Review the setup."); });
 bind("#experiment-form", "submit", async event => {
   event.preventDefault(); const body = requestBody(); persistDraft();
   await submitJob("/experiments", body); $("#job-panel").scrollIntoView({ behavior: "smooth" }); notice("");
@@ -366,14 +456,27 @@ bind("#result-basin", "change", renderPredictions);
 bind("#result-lead", "change", renderPredictions);
 document.querySelectorAll("[data-download]").forEach(button => button.addEventListener("click", action(async () => {
   if (!state.run) return; const name = button.dataset.download;
-  downloadBlob(await api(`/runs/${encodeURIComponent(state.run.run_id)}/artifacts/${name}`, { download: true }), name === "archive" ? "regional_experiment.zip" : `${name}.${name === "config" ? "json" : "csv"}`);
+  downloadBlob(await api(`/runs/${encodeURIComponent(state.run.run_id)}/artifacts/${name}`, { download: true }), name === "archive" ? "regional_experiment.zip" : `${name}.${["config", "benchmark_manifest"].includes(name) ? "json" : "csv"}`);
 })));
 bind("#promote-run", "click", async () => { await api(`/runs/${encodeURIComponent(state.run.run_id)}/save`, { method: "POST" }); notice("Run saved to the shared leaderboard."); });
 bind("#compare-button", "click", async () => {
   const a = $("#compare-a").value, b = $("#compare-b").value; if (!a || !b || a === b) throw new Error("Choose two different experiments.");
   const result = await api("/comparisons", { method: "POST", body: { run_a: a, run_b: b } });
   const node = $("#comparison-output"); node.classList.remove("empty-state"); node.replaceChildren(el("h4", { text: "Aggregate metrics · candidate minus baseline" }));
+  node.append(el("p", { text: result.benchmark_comparison?.reason || "Compare task definitions and coverage before interpreting deltas." }));
+  if (result.paired_comparison) { const paired = el("div"); node.append(paired); renderData(paired, result.paired_comparison); }
   renderTable(node, Object.entries(result.aggregate_delta_b_minus_a).map(([metric, delta]) => ({ metric: pretty(metric), baseline: result.run_a.aggregate_metrics[metric], candidate: result.run_b.aggregate_metrics[metric], delta })));
+  if (Object.keys(result.flood_delta_b_minus_a || {}).length) {
+    node.append(el("h4", { text: "Flood scores · means across available basin/seed rows" }));
+    renderTable(node, Object.entries(result.flood_delta_b_minus_a).filter(([metric]) => !metric.endsWith("_count")).map(([metric, delta]) => ({ metric,
+      baseline: result.run_a.flood_summary[metric], candidate: result.run_b.flood_summary[metric], delta,
+      baseline_count: result.run_a.flood_summary[`${metric}_count`], candidate_count: result.run_b.flood_summary[`${metric}_count`] })));
+  }
+  if (Object.keys(result.drought_delta_b_minus_a || {}).length) {
+    node.append(el("h4", { text: "Drought lead scores · means across available basin/seed rows" }));
+    renderTable(node, Object.entries(result.drought_delta_b_minus_a).map(([metric, delta]) => ({ metric,
+      baseline: result.run_a.drought_summary[metric], candidate: result.run_b.drought_summary[metric], delta })));
+  }
   node.append(el("h4", { text: "Per-catchment differences" })); renderTable(node, Object.entries(result.per_basin_delta_b_minus_a).map(([basin, values]) => ({ basin, ...values })));
 });
 bind("#replay-run", "change", () => { populateBasins("replay"); $("#replay-episode").replaceChildren(option("", "Find episodes to begin")); $("#replay-output").hidden = true; stopPlayback(); });

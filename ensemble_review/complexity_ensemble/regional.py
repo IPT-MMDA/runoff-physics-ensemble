@@ -32,11 +32,15 @@ from .camels_ch_chem import (
 )
 from .hydrology import HydrologyRoutedOutput, RoutedHydrologyModel
 from .hydrology_comparison import _add_observation_noise, _metrics
+from .benchmarks import BenchmarkConfig, validate_benchmark
 from .hydrology_data import HydrologySeries, load_camels_ch
 from .hydrology_complexity import SCORE_ROUTING_METHODS, build_hydrology_complexity_estimator
 from .estreams import ESTREAMS_DYNAMIC_FEATURES, EStreamsVegetationSnow
 from .hydrology_extreme_comparison import extreme_metrics
 from .hydrology_events import EVENT_TYPES, basin_event_metrics, regional_event_metrics
+from .hydrology_drought import (
+    VERIFICATION as DROUGHT_VERIFICATION, fit_thresholds as fit_drought_thresholds, verify_drought,
+)
 from .hydrology_hard_routing_consolidation_comparison import hard_routed_losses
 from .ood import MahalanobisOODDetector
 from .stacking import fit_convex_stacking_weight
@@ -54,7 +58,7 @@ _SCOPE_ALIASES = {
 }
 TRAINING_APPROACHES = (
     "soft_routing", "hard_routing", "distillation", "no_routing",
-    "static_50_50", "ood_fallback", "stacking",
+    "static_50_50", "ood_fallback", "stacking", "persistence", "seasonal_climatology",
 )
 PHYSICS_MODELS = ("linear_reservoir",)
 PHYSICS_MODEL_REGISTRY = {"linear_reservoir": "linear reservoir water balance"}
@@ -104,6 +108,8 @@ class ModelArchitectureConfig:
     fourier_frequencies: int = 32
     fourier_scale: float | None = None
     static_embedding_size: int = 8
+    lstm_hidden_size: int = 64
+    lstm_layers: int = 1
 
 
 @dataclass(frozen=True)
@@ -173,6 +179,11 @@ class ExtremeEventConfig:
     minimum_days: int = 3
     pulse_gap_days: int = 7
     minimum_basins: int = 2
+    drought_definition: str = "seasonal_quantile"
+    drought_smoothing: str = "trailing"
+    drought_quantile: float = 0.15
+    drought_calendar_window: int = 31
+    drought_minimum_days: int = 1
 
 
 @dataclass(frozen=True)
@@ -200,8 +211,17 @@ class RegionalExperimentConfig:
     hyd_responses_root: str | Path | None = None
     hyd_responses_features: tuple[str, ...] = DEFAULT_HYD_RESPONSES_FEATURES
     hyd_responses_static: bool = False
+    benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
+    bafu_root: str | Path | None = None
+    bafu_statistics_zip: str | Path | None = None
+    bafu_return_levels: str | Path | None = None
 
     def validate(self) -> None:
+        validate_benchmark(self)
+        if self.strategy.approach in {"persistence", "seasonal_climatology"} and self.physics.optimization_mode != "none":
+            raise ValueError("Non-trainable baselines do not support physics optimization")
+        if self.model.lstm_hidden_size < 1 or self.model.lstm_layers < 1:
+            raise ValueError("LSTM dimensions must be positive")
         targets = tuple(dict.fromkeys(map(str, self.basins.target_basins)))
         if not targets:
             raise ValueError("at least one prediction target basin is required")
@@ -212,8 +232,8 @@ class RegionalExperimentConfig:
             raise ValueError("each date range must start on or before it ends")
         if not (ranges[0].end < ranges[1].start and ranges[1].end < ranges[2].start):  # type: ignore[operator]
             raise ValueError("train, validation, and test ranges must be ordered and non-overlapping")
-        if self.model.complex_expert not in {"mlp", "pinnmamba"}:
-            raise ValueError("complex_expert must be 'mlp' or 'pinnmamba'")
+        if self.model.complex_expert not in {"mlp", "pinnmamba", "lstm"}:
+            raise ValueError("complex_expert must be mlp, pinnmamba, or lstm")
         if self.model.simple_expert not in {"rbf", "fourier"}:
             raise ValueError("simple_expert must be 'rbf' or 'fourier'")
         if self.strategy.approach not in TRAINING_APPROACHES:
@@ -277,7 +297,7 @@ class RegionalExperimentConfig:
                 "KAN physics optimization requires target basins in training; choose "
                 "all_basins or targets_only"
             )
-        if self.physics.distillation_teacher not in TRAINING_APPROACHES:
+        if self.physics.distillation_teacher not in set(TRAINING_APPROACHES) - {"persistence", "seasonal_climatology"}:
             raise ValueError(f"distillation teacher must be one of {TRAINING_APPROACHES}")
         if min(
             self.physics.kan_candidates, self.physics.kan_steps, self.physics.kan_grid,
@@ -293,8 +313,8 @@ class RegionalExperimentConfig:
             and not self.physics.robustness_noise_levels
         ):
             raise ValueError("robustness and balanced KAN modes require noise levels")
-        if self.extremes.mode not in {"none", "statistical", "event_based"}:
-            raise ValueError("extreme mode must be 'none', 'statistical', or 'event_based'")
+        if self.extremes.mode not in {"none", "statistical", "event_based", "drought"}:
+            raise ValueError("extreme mode must be none, statistical, event_based, or drought")
         if self.forecast.mode not in {"one_day", "rolling"} or self.forecast.horizon_days < 2:
             raise ValueError("forecast mode or horizon days are invalid")
         if (self.extremes.mode == "event_based" and
@@ -305,6 +325,21 @@ class RegionalExperimentConfig:
                 or self.extremes.minimum_days < 1 or self.extremes.pulse_gap_days < 0
                 or self.extremes.minimum_basins < 2)):
             raise ValueError("event definitions or thresholds are invalid")
+        if self.extremes.mode == "drought":
+            drought = self.extremes
+            if (drought.drought_definition not in {"seasonal_quantile", "q347"}
+                    or drought.drought_smoothing not in {"trailing", "centered"}
+                    or not 0 < drought.drought_quantile < 1
+                    or not isinstance(drought.drought_calendar_window, int)
+                    or not 1 <= drought.drought_calendar_window <= 365
+                    or drought.drought_calendar_window % 2 != 1
+                    or not isinstance(drought.drought_minimum_days, int)
+                    or drought.drought_minimum_days < 1):
+                raise ValueError("invalid drought definition, smoothing, quantile, calendar window, or minimum days")
+            if drought.drought_smoothing == "centered" and (
+                    self.forecast.mode != "rolling" or self.forecast.horizon_days < 4):
+                raise ValueError("Centred drought smoothing requires rolling forecasts with at least 4 days; "
+                                 "each scored day needs three later predictions from the same issue")
         if self.extremes.definition not in {"automatic_q95", "absolute", "quantile"}:
             raise ValueError("unknown extreme-event definition")
         values = list(self.extremes.per_basin_values.values())
@@ -398,8 +433,14 @@ class CAMELSCHCatalog:
             if "timeseries" in path.parts or "annual_timeseries" in path.parts:
                 continue
             try:
-                with path.open(encoding="utf-8-sig", newline="") as source:
-                    rows = list(csv.DictReader(line for line in source if not line.startswith("#")))
+                # Some CAMELS-CH releases use Windows Western European text
+                # for accented gauge names. Decode the whole file before
+                # parsing so one name cannot discard all catchment areas.
+                try:
+                    text = path.read_text(encoding="utf-8-sig")
+                except UnicodeDecodeError:
+                    text = path.read_text(encoding="cp1252")
+                rows = list(csv.DictReader(line for line in text.splitlines() if not line.startswith("#")))
             except (OSError, UnicodeError, csv.Error):
                 continue
             for row in rows:
@@ -543,21 +584,7 @@ def _empty_split(sequence_length: int, feature_count: int, static_count: int) ->
                          torch.empty(0, static_count), torch.empty(0), (), (), None)
 
 
-def make_regional_hydrology_data(
-    series_by_basin: Mapping[str, HydrologySeries],
-    static_attributes: Mapping[str, Mapping[str, float | None]],
-    scope: BasinScopeConfig,
-    dates: DateSplitConfig,
-    *,
-    sequence_length: int = 30,
-    routing_context_length: int | None = None,
-) -> RegionalHydrologyData:
-    """Create windows first, then assign them by target date without leakage."""
-    if sequence_length < 2:
-        raise ValueError("sequence_length must be at least two")
-    routing_context_length = sequence_length if routing_context_length is None else routing_context_length
-    if routing_context_length < sequence_length:
-        raise ValueError("routing_context_length must be at least sequence_length")
+def _regional_window_indices(series_by_basin, scope, dates, routing_context_length):
     targets = tuple(dict.fromkeys(map(str, scope.target_basins)))
     training_basins = effective_training_basins(scope, series_by_basin)
     relevant = tuple(dict.fromkeys((*training_basins, *targets)))
@@ -596,6 +623,26 @@ def make_regional_hydrology_data(
         details = "; ".join(f"{basin}: {reason}" for basin, reason in skipped.items())
         raise ValueError(f"No usable {missing_role} remain for the selected date splits and input-window length. {details}")
     relevant = tuple(basin for basin in relevant if basin not in skipped)
+    return training_basins, targets, relevant, window_indices, skipped
+
+
+def make_regional_hydrology_data(
+    series_by_basin: Mapping[str, HydrologySeries],
+    static_attributes: Mapping[str, Mapping[str, float | None]],
+    scope: BasinScopeConfig,
+    dates: DateSplitConfig,
+    *,
+    sequence_length: int = 30,
+    routing_context_length: int | None = None,
+) -> RegionalHydrologyData:
+    """Create windows first, then assign them by target date without leakage."""
+    if sequence_length < 2:
+        raise ValueError("sequence_length must be at least two")
+    routing_context_length = sequence_length if routing_context_length is None else routing_context_length
+    if routing_context_length < sequence_length:
+        raise ValueError("routing_context_length must be at least sequence_length")
+    training_basins, targets, relevant, window_indices, skipped = _regional_window_indices(
+        series_by_basin, scope, dates, routing_context_length)
     forcing_names = series_by_basin[relevant[0]].forcing_names
     if any(series_by_basin[item].forcing_names != forcing_names for item in relevant):
         raise ValueError("all regional series must have identical forcing columns")
@@ -718,6 +765,7 @@ class ExperimentResult:
     cancelled: bool = False
     artifact_paths: dict[str, str] = field(default_factory=dict)
     forecast_metrics: dict[str, dict[str, float | int]] = field(default_factory=dict)
+    drought_details: dict[str, list[dict[str, object]]] = field(default_factory=dict)
 
 
 ProgressCallback = Callable[[float, str], None]
@@ -738,6 +786,8 @@ def _architecture_kwargs(config: ModelArchitectureConfig, input_dim: int) -> tup
         "hidden_d_ff": config.mamba_feed_forward_size,
         "static_embedding_dim": config.static_embedding_size,
     })
+    if config.complex_expert == "lstm":
+        complex_kwargs = {"hidden_dim": config.lstm_hidden_size, "num_layers": config.lstm_layers}
     if config.simple_expert == "rbf":
         simple_kwargs = {"n_centers": config.rbf_centers}
         if config.rbf_width is not None:
@@ -1120,7 +1170,7 @@ def _rolling_test_predictions(
                     )
                     value = float(output.discharge[0, 0].cpu()) * scale
                     predicted_flow[day] = value
-                    residual = float(model.physics_residual(output.discharge, physical).square()[0].cpu())
+                    residual = float(model.physics_residual(output.discharge, physical).square()[0].cpu()) if model.physics_available else float("nan")
                     result.append(PredictionRecord(
                         seed, basin, day, float(data.test.targets[index]) * scale, value,
                         float(output.complex_weight[0].cpu()), residual,
@@ -1134,9 +1184,13 @@ def _rolling_test_predictions(
 def _resolved(config: RegionalExperimentConfig, data: RegionalHydrologyData) -> dict[str, object]:
     value = asdict(config)
     value["data_root"] = str(config.data_root)
+    for name in ("bafu_root", "bafu_statistics_zip", "bafu_return_levels"):
+        if value.get(name) is not None:
+            value[name] = str(value[name])
     value["analysis_task"] = (
         "daily_discharge_with_extremes" if config.extremes.mode == "statistical"
         else "daily_discharge_with_hydrological_events" if config.extremes.mode == "event_based"
+        else "daily_discharge_with_drought" if config.extremes.mode == "drought"
         else "daily_discharge_forecasting"
     )
     if config.estreams_root is not None:
@@ -1148,12 +1202,128 @@ def _resolved(config: RegionalExperimentConfig, data: RegionalHydrologyData) -> 
     for split in ("train", "validation", "test"):
         item = value["dates"][split]  # type: ignore[index]
         item["start"], item["end"] = str(item["start"]), str(item["end"])
+    if config.extremes.mode == "drought":
+        value["drought_verification"] = {
+            "method": DROUGHT_VERIFICATION,
+            "threshold_reference": "training_observations_only",
+            "target_source": "experiment observed discharge",
+            "averaging_days": 7,
+            "issue_handling": "separate_forecast_trajectories",
+            "weather": "perfect_weather_hindcast" if config.forecast.mode == "rolling" else "historical_inputs",
+            "provided_event_labels": False,
+        }
     value["effective_training_basins"] = list(data.training_basins)
     value["basins"]["target_basins"] = list(data.target_basins)
     value["skipped_basins"] = dict(data.skipped_basins)
     value["feature_names"] = list(data.feature_names)
     value["static_feature_names"] = list(data.static_feature_names)
     return value
+
+
+def preview_regional_hydrology_data(series_by_basin, static_attributes, scope, dates, *, sequence_length, routing_context_length):
+    from types import SimpleNamespace
+    training, targets, relevant, indices, skipped = _regional_window_indices(series_by_basin, scope, dates, routing_context_length)
+    forcing_names = series_by_basin[relevant[0]].forcing_names
+    if any(series_by_basin[b].forcing_names != forcing_names for b in relevant):
+        raise ValueError("all regional series must have identical forcing columns")
+    splits = {}
+    for name in ("train", "validation", "test"):
+        cohort = training if name == "train" else targets
+        selected = [(b, i) for b in relevant if b in cohort for i in indices[b][name]]
+        splits[name] = SimpleNamespace(targets=torch.tensor([float(series_by_basin[b].discharge[i]) for b, i in selected]),
+            basin_ids=tuple(b for b, i in selected), target_dates=tuple(series_by_basin[b].dates[i] for b, i in selected))
+    if not all(len(split.targets) for split in splits.values()):
+        raise ValueError("train, validation and test ranges must contain usable windows")
+    return SimpleNamespace(**splits, training_basins=training, target_basins=targets, skipped_basins=skipped,
+        feature_names=(*forcing_names, "previous_discharge", "day_sin", "day_cos"), discharge_scale=torch.tensor(1.),
+        static_feature_names=tuple(sorted({key for b in training for key in static_attributes.get(b, {})})))
+
+
+def prepare_regional_data(config, *, catalog=None, series_by_basin=None, audit_only=False):
+    """Shared read-only loading and window preparation; never fits a model."""
+    config.validate()
+    catalog = catalog or CAMELSCHCatalog(config.data_root)
+    eligible = tuple(config.basins.eligible_basins or catalog.eligible_ids)
+    training = effective_training_basins(config.basins, eligible)
+    relevant = tuple(dict.fromkeys((*training, *config.basins.target_basins)))
+    hp = config.hyperparameters
+    routed = config.strategy.approach in {"soft_routing", "hard_routing", "distillation"}
+    routed = routed or (config.physics.optimization_mode == "distillation" and config.physics.distillation_teacher in {"soft_routing", "hard_routing", "distillation"})
+    context_length = hp.routing_context_length if routed and hp.complexity_method in SCORE_ROUTING_METHODS else hp.sequence_length
+    full_start = config.dates.train.resolved().start - timedelta(days=context_length)  # type: ignore[operator]
+    full_end = config.dates.test.resolved().end
+    provenance = {}
+    series = dict(series_by_basin or {})
+    if config.benchmark.mode != "none":
+        from .benchmarks import prepare_bafu
+        series, provenance = prepare_bafu(config, catalog, relevant, full_start, full_end)
+    load_failures: dict[str, str] = {}
+    for basin in relevant:
+        if basin not in series and config.benchmark.mode == "none":
+            try:
+                series[basin] = catalog.load_series(basin, full_start, full_end)  # type: ignore[arg-type]
+            except (ValueError, FileNotFoundError) as error:
+                load_failures[basin] = str(error)
+    if config.camels_state_features:
+        series = augment_camels_ch_states(config.data_root, series, config.camels_state_features)
+    if config.estreams_root is not None:
+        series = EStreamsVegetationSnow(config.estreams_root).augment(
+            series, config.estreams_features
+        )
+    if config.camels_chem_root is not None:
+        series = CAMELSCHChemPressures(config.camels_chem_root).augment(
+            series, config.camels_chem_features
+        )
+    loaded = tuple(basin for basin in relevant if basin in series)
+    attrs = {basin: ({} if config.benchmark.mode == "bafu_only" else catalog.get(basin).static_attributes) for basin in loaded}
+    if config.hyd_responses_root is not None:
+        hyd = HYDResponses(config.hyd_responses_root)
+        series = hyd.augment(series, config.hyd_responses_features)
+        if config.hyd_responses_static:
+            physical = hyd.physical_attributes()
+            attrs = {basin: {**values, **physical.get(basin, {})} for basin, values in attrs.items()}
+    if config.benchmark.mode != "none":
+        provenance["missing_stations"] = sorted(set(relevant) - series.keys())
+    if config.benchmark.mode != "none" and config.benchmark.strict_cohort:
+        missing = set(relevant) - series.keys()
+        if missing:
+            raise ValueError("Strict benchmark cohort has no usable observations/predictors: " + ", ".join(sorted(missing)))
+    scope = replace(config.basins, eligible_basins=eligible)
+    provenance["training_static_attributes"] = attrs
+    builder = preview_regional_hydrology_data if audit_only else make_regional_hydrology_data
+    data = builder(series, attrs, scope, config.dates,
+                                        sequence_length=hp.sequence_length,
+                                        routing_context_length=context_length)
+    if config.benchmark.mode != "none" and config.benchmark.strict_cohort and data.skipped_basins:
+        raise ValueError("Strict benchmark cohort has incomplete windows: " + str(dict(data.skipped_basins)))
+    provenance["load_failures"] = load_failures
+    provenance["context_length"] = context_length
+    return catalog, data, series, provenance
+
+
+def _baseline_predictions(config, data, series, seed):
+    """Training-only monthly climatology or last available observed discharge."""
+    records = []
+    train_period = config.dates.train.resolved()
+    pooled = [(day.month, float(q)) for basin in data.training_basins
+              for day, q in zip(series[basin].dates, series[basin].discharge) if train_period.contains(day)]
+    for basin in data.target_basins:
+        reference = [(day.month, float(q)) for day, q in zip(series[basin].dates, series[basin].discharge)
+                     if train_period.contains(day)] if basin in data.training_basins else pooled
+        indices = sorted((i for i, b in enumerate(data.test.basin_ids) if b == basin), key=lambda i: data.test.target_dates[i])
+        block_start = None; issue = None; persistent = None; previous = None; lead = 0
+        for index in indices:
+            day = data.test.target_dates[index]
+            horizon = config.forecast.horizon_days if config.forecast.mode == "rolling" else 1
+            if block_start is None or lead >= horizon or day != previous + timedelta(days=1):
+                block_start = day; issue = day - timedelta(days=1); lead = 0
+                persistent = float(data.test.physical_inputs[index, -1, data.feature_names.index("previous_discharge")])
+            lead += 1; previous = day
+            values = [q for month, q in reference if month == day.month] or [q for _, q in reference]
+            predicted = persistent if config.strategy.approach == "persistence" else sum(values) / len(values)
+            records.append(PredictionRecord(seed, basin, day, float(data.test.targets[index] * data.discharge_scale),
+                predicted, float("nan"), float("nan"), float("nan"), float("nan"), issue, lead))
+    return records
 
 
 def run_regional_experiment(
@@ -1187,38 +1357,23 @@ def run_regional_experiment(
                                     fit_horizon=hp.lyapunov_fit_horizon, min_r2=hp.lyapunov_min_r2)
         # Feature names are known after constructing the regional data below.
     context_length = hp.routing_context_length if uses_complexity and hp.complexity_method in SCORE_ROUTING_METHODS else hp.sequence_length
-    full_start = config.dates.train.resolved().start - timedelta(days=context_length)  # type: ignore[operator]
-    full_end = config.dates.test.resolved().end
-    series = dict(series_by_basin or {})
-    load_failures: dict[str, str] = {}
-    for basin in relevant:
-        if basin not in series:
-            try:
-                series[basin] = catalog.load_series(basin, full_start, full_end)  # type: ignore[arg-type]
-            except (ValueError, FileNotFoundError) as error:
-                load_failures[basin] = str(error)
-    if config.camels_state_features:
-        series = augment_camels_ch_states(config.data_root, series, config.camels_state_features)
-    if config.estreams_root is not None:
-        series = EStreamsVegetationSnow(config.estreams_root).augment(
-            series, config.estreams_features
-        )
-    if config.camels_chem_root is not None:
-        series = CAMELSCHChemPressures(config.camels_chem_root).augment(
-            series, config.camels_chem_features
-        )
-    loaded = tuple(basin for basin in relevant if basin in series)
-    attrs = {basin: catalog.get(basin).static_attributes for basin in loaded}
-    if config.hyd_responses_root is not None:
-        hyd = HYDResponses(config.hyd_responses_root)
-        series = hyd.augment(series, config.hyd_responses_features)
-        if config.hyd_responses_static:
-            physical = hyd.physical_attributes()
-            attrs = {basin: {**values, **physical.get(basin, {})} for basin, values in attrs.items()}
-    scope = replace(config.basins, eligible_basins=eligible)
-    data = make_regional_hydrology_data(series, attrs, scope, config.dates,
-                                        sequence_length=hp.sequence_length,
-                                        routing_context_length=context_length)
+    catalog, data, series, provenance = prepare_regional_data(config, catalog=catalog, series_by_basin=series_by_basin)
+    resolved = _resolved(config, data)
+    if config.benchmark.mode != "none":
+        from .benchmarks import manifest
+        resolved["benchmark_manifest"] = manifest(config, data, series, provenance)
+    if config.extremes.mode == "drought":
+        reference = config.dates.train.resolved()
+        for basin in data.target_basins:
+            values = {day: float(value) for day, value in zip(series[basin].dates, series[basin].discharge)}
+            fitted = fit_drought_thresholds(values, reference.start, reference.end,
+                definition=config.extremes.drought_definition, smoothing=config.extremes.drought_smoothing,
+                probability=config.extremes.drought_quantile,
+                calendar_window=config.extremes.drought_calendar_window)
+            if not any(fitted.at(day) is not None for day, item in zip(data.test.target_dates, data.test.basin_ids)
+                       if item == basin):
+                raise ValueError(f"Basin {basin}: training observations do not cover the test calendar "
+                                 "for the selected seasonal drought window")
     if uses_complexity and hp.complexity_method in SCORE_ROUTING_METHODS:
         estimator = build_hydrology_complexity_estimator(hp.complexity_method, data.feature_names,
                                                         **estimator_kwargs)
@@ -1241,8 +1396,7 @@ def run_regional_experiment(
                                         runtime_seconds=time.perf_counter() - started, cancelled=True)
             scored[name] = replace(split, routing_features=torch.cat(features))
         data = replace(data, **scored)
-    resolved = _resolved(config, data)
-    resolved["skipped_basins"].update(load_failures)
+    resolved["skipped_basins"].update(provenance.get("load_failures", {}))
     resolved["basins"]["eligible_basins"] = [
         basin for basin in eligible if basin not in resolved["skipped_basins"]
     ]
@@ -1260,6 +1414,9 @@ def run_regional_experiment(
     for seed_index, seed in enumerate(config.hyperparameters.seeds):
         if _cancelled(cancellation_token): break
         try:
+            if config.strategy.approach in {"persistence", "seasonal_climatology"}:
+                predictions.extend(_baseline_predictions(config, data, series, seed))
+                continue
             torch.manual_seed(seed)
             simple_kwargs, complex_kwargs = _architecture_kwargs(config.model,
                 data.train.inputs.shape[1] * data.train.inputs.shape[2] + data.train.static_inputs.shape[1])
@@ -1278,6 +1435,8 @@ def run_regional_experiment(
                 ).to(device)
 
             model = build_model()
+            if config.benchmark.mode != "none" and config.benchmark.target == "daily_max":
+                model.physics_available = False
             if config.physics.optimization_mode != "none":
                 teacher_approach = (
                     config.physics.distillation_teacher
@@ -1451,7 +1610,7 @@ def run_regional_experiment(
                         predictions.append(PredictionRecord(
                             seed, data.test.basin_ids[index], data.test.target_dates[index],
                             float(observed[index]), float(predicted[index]),
-                            float(output.complex_weight[index].cpu()), float(residual[index]),
+                            float(output.complex_weight[index].cpu()), float(residual[index]) if model.physics_available else float("nan"),
                             float(ood_score[index].cpu()),
                             float(detector.threshold.cpu()) if detector is not None else float("nan"),
                             data.test.target_dates[index] - timedelta(days=1), 1,
@@ -1508,10 +1667,12 @@ def run_regional_experiment(
         valid = estimates[:, 1] > 0
         routing["valid_complexity_fraction"] = float(valid.float().mean())
         routing["mean_complexity_score"] = float(estimates[:, 0].mean())
-    resolved["fitted_diagnostics"] = dict(routing)
+    from .serialization import json_safe
+    resolved["fitted_diagnostics"] = json_safe(routing)
     extremes = []
+    drought_details = {}
     if config.extremes.mode == "statistical":
-        for basin, threshold in _thresholds(config.extremes, data.target_basins, series, config.dates.train).items():
+        for basin, threshold in (resolved["benchmark_manifest"]["thresholds_mm_day"] if config.benchmark.mode != "none" else _thresholds(config.extremes, data.target_basins, series, config.dates.train)).items():
             rows = [item for item in predictions if item.basin_id == basin]
             # Metrics are evaluated per seed because repeated dates are not one event sequence.
             for seed in config.hyperparameters.seeds:
@@ -1521,8 +1682,20 @@ def run_regional_experiment(
                     metrics = extreme_metrics(torch.tensor([x.predicted_mm_day for x in selected]),
                         torch.tensor([x.observed_mm_day for x in selected]),
                         tuple(x.target_date for x in selected), threshold)
+                    if config.benchmark.mode != "none":
+                        from .flood_verification import flood_metrics
+                        metrics.update(flood_metrics(selected, threshold))
                     extremes.append({"basin_id": basin, "seed": seed, "event_type": "statistical_high_flow",
                                      "threshold_mm_day": threshold, **metrics})
+                    if config.benchmark.mode != "none":
+                        for lead in sorted({r.lead_day for r in selected}):
+                            lead_rows = [r for r in selected if r.lead_day == lead]
+                            scores = extreme_metrics(torch.tensor([r.predicted_mm_day for r in lead_rows]),
+                                torch.tensor([r.observed_mm_day for r in lead_rows]), tuple(r.target_date for r in lead_rows), threshold)
+                            allowed = {"test_days", "observed_extreme_days", "precision", "recall", "critical_success_index", "false_alarm_ratio", "average_precision", "extreme_rmse_mm_day"}
+                            extremes.append({"basin_id": basin, "seed": seed, "lead_day": lead,
+                                "event_type": "high_flow_day_by_lead", "threshold_mm_day": threshold,
+                                **{k: v for k, v in scores.items() if k in allowed}})
     elif config.extremes.mode == "event_based":
         thresholds = _event_thresholds(config.extremes, data.target_basins,
                                        series, config.dates.train)
@@ -1569,9 +1742,23 @@ def run_regional_experiment(
                         )
                         extremes.append({"basin_id": "all", "seed": seed,
                                          "event_type": event_type, **metrics})
+    elif config.extremes.mode == "drought" and predictions:
+        period = config.dates.train.resolved()
+        extremes, drought_details = verify_drought(
+            predictions, series, period.start, period.end,
+            definition=config.extremes.drought_definition,
+            smoothing=config.extremes.drought_smoothing,
+            probability=config.extremes.drought_quantile,
+            calendar_window=config.extremes.drought_calendar_window,
+            minimum_days=config.extremes.drought_minimum_days,
+        )
+        if not any(row["eligible"] for row in drought_details["days"]):
+            failures.append("No drought days could be evaluated: check training calendar coverage, "
+                            "seven-day observation windows, smoothing and forecast horizon")
     result = ExperimentResult(predictions, aggregate, per_basin, routing, traces, extremes,
                               failures, resolved, parameter_count, time.perf_counter()-started,
                               _cancelled(cancellation_token))
+    result.drought_details = drought_details
     if config.forecast.mode == "rolling":
         for lead in sorted({item.lead_day for item in predictions}):
             rows = [item for item in predictions if item.lead_day == lead]
@@ -1603,11 +1790,36 @@ def write_result_artifacts(result: ExperimentResult, directory: str | Path | Non
                              "nse":values["nse"], "kge":values["kge"],
                              "rmse_mm_day":values["rmse_mm_day"]})
     config_path.write_text(json.dumps(result.resolved_config, indent=2, allow_nan=False), encoding="utf-8")
+    drought_files = {}
+    if "benchmark_manifest" in result.resolved_config:
+        benchmark_path = root / "benchmark_manifest.json"
+        benchmark_path.write_text(json.dumps(result.resolved_config["benchmark_manifest"], indent=2, allow_nan=False), encoding="utf-8")
+        drought_files["benchmark_manifest"] = str(benchmark_path)
+        flood_path = root / "flood_metrics.csv"
+        from .serialization import json_safe
+        columns = list(dict.fromkeys(["basin_id", "seed", "event_type", *(key for row in result.extreme_events for key in row)]))
+        with flood_path.open("w", newline="", encoding="utf-8") as target:
+            writer = csv.DictWriter(target, fieldnames=columns)
+            writer.writeheader(); writer.writerows(json_safe(result.extreme_events))
+        drought_files["flood_metrics"] = str(flood_path)
+    if result.resolved_config.get("extremes", {}).get("mode") == "drought":
+        for name, rows in (("drought_metrics", result.extreme_events),
+                           ("drought_days", result.drought_details.get("days", [])),
+                           ("drought_events", result.drought_details.get("events", []))):
+            path = root / f"{name}.csv"
+            columns = list(dict.fromkeys(["basin_id", "seed", "issue_date",
+                                          *(key for row in rows for key in row)]))
+            with path.open("w", newline="", encoding="utf-8") as target:
+                writer = csv.DictWriter(target, fieldnames=columns)
+                writer.writeheader()
+                writer.writerows(rows)
+            drought_files[name] = str(path)
     archive = root/"regional_experiment.zip"
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
-        for path in (predictions_path, metrics_path, config_path): bundle.write(path, path.name)
+        for path in (predictions_path, metrics_path, config_path, *(Path(value) for value in drought_files.values())):
+            bundle.write(path, path.name)
     result.artifact_paths = {"predictions":str(predictions_path), "metrics":str(metrics_path),
-                             "config":str(config_path), "archive":str(archive)}
+                             "config":str(config_path), "archive":str(archive), **drought_files}
     return result.artifact_paths
 
 

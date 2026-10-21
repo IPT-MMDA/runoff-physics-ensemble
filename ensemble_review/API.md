@@ -306,3 +306,9 @@ python -m pytest -q ensemble_review/tests
 This API reproduces the current UI's experiments and analyses. It does not
 persist trained weights or provide inference from saved checkpoints; adding
 that remains a separate model-serving feature.
+
+## BAFU benchmark tasks
+
+See [BAFU_BENCHMARKS.md](BAFU_BENCHMARKS.md) for BAFU-only and combined-data
+configuration, read-only preflight, the browser controls, reference baselines,
+verified threshold imports, provenance artifacts and comparison contracts.

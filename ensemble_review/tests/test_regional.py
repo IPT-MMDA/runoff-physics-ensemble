@@ -572,6 +572,29 @@ def test_catalog_joins_numeric_shapefile_gauge_ids(tmp_path, monkeypatch):
     assert 45 < miny < maxy < 48
 
 
+@pytest.mark.parametrize("encoding", ["utf-8-sig", "cp1252"])
+def test_catalog_loads_catchment_areas_with_accented_metadata(tmp_path, encoding):
+    from complexity_ensemble.bafu import station_areas
+
+    for kind in ("observation_based", "simulation_based"):
+        directory = tmp_path / "timeseries" / kind
+        directory.mkdir(parents=True)
+        prefix = "obs" if kind == "observation_based" else "sim"
+        for basin in ("2063", "2067"):
+            (directory / f"CAMELS_CH_{prefix}_based_{basin}.csv").touch()
+    attributes = tmp_path / "static_attributes"
+    attributes.mkdir()
+    (attributes / "CAMELS_CH_topographic_attributes.csv").write_text(
+        "# Topographic attributes\n"
+        "gauge_id,gauge_name,water_body_name,area\n"
+        "2063,Murgenthal,Aare,10059.4\n"
+        "2067,Martina,Rhône,1937.5\n", encoding=encoding,
+    )
+    catalog = CAMELSCHCatalog(tmp_path)
+    assert station_areas(catalog) == {"2063": 10059.4, "2067": 1937.5}
+    assert catalog.get("2063").name == "Murgenthal"
+
+
 def test_regional_catalog_does_not_require_optional_annual_landcover(tmp_path):
     observed = tmp_path / "timeseries" / "observation_based"
     simulated = tmp_path / "timeseries" / "simulation_based"

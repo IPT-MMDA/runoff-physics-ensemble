@@ -31,6 +31,9 @@ class Application:
                 raise ValueError(f"optional {kind} dataset is not configured")
         config = config_from_mapping(
             cfg, data_root=registration.data_root,
+            bafu_root=registration.bafu_root,
+            bafu_statistics_zip=registration.bafu_statistics_zip,
+            bafu_return_levels=registration.bafu_return_levels,
             estreams_root=registration.estreams_root if payload.get("use_estreams") else None,
             camels_chem_root=registration.camels_chem_root if payload.get("use_camels_chem") else None,
             hyd_responses_root=registration.hyd_responses_root if payload.get("use_hyd_responses") else None,
@@ -42,6 +45,20 @@ class Application:
         if check_data:
             catalog = self.catalog(payload["dataset_id"])
             eligible = set(catalog.eligible_ids)
+            if config.benchmark.mode != "none":
+                from dataclasses import replace
+                from .bafu import basin_compatibility
+                compatibility = basin_compatibility(catalog, registration.bafu_root)
+                eligible = {basin for basin, modes in compatibility.items()
+                            if modes[config.benchmark.mode]['eligible']}
+                invalid = set(config.basins.target_basins) - eligible
+                if invalid:
+                    raise ValueError('Incompatible BAFU target stations: ' + '; '.join(
+                        basin + ': ' + ', '.join(compatibility.get(basin, {}).get(
+                            config.benchmark.mode, {}).get('reasons', ['Unknown station']))
+                        for basin in sorted(invalid)))
+                if config.basins.eligible_basins is None:
+                    config = replace(config, basins=replace(config.basins, eligible_basins=tuple(sorted(eligible))))
             if set(config.basins.target_basins) - eligible:
                 raise ValueError("target basins must be eligible basins in this dataset")
             if config.basins.eligible_basins is not None and set(config.basins.eligible_basins) - eligible:

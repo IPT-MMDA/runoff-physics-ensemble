@@ -61,6 +61,17 @@ Launch with `--hyd-responses-root ../datasets/HYD_RESPONSES` or set
 For rolling forecasts, CAMELS-CH and HYD-RESPONSES water states are held at
 their issue-day values rather than reading later state observations.
 
+The Task tab also offers **Hydrological drought (HYD-RESPONSES-style definitions)**.
+Choose trailing or centred seven-day discharge means, seasonal low-flow
+percentiles or a fixed training-period Q347 estimate, and minimum event duration.
+Users retain their own basins, date splits and dataset selections. Thresholds
+are fitted only to training observations. Centred smoothing requires rolling
+mode with at least four forecast days; the last three leads of each issue are
+excluded rather than filled with later observations. This task has separate
+issue-aware drought verification and audit CSVs in the run archive; existing
+event tasks keep their scoring. HYD-RESPONSES water-state predictors remain
+optional and independent of the task. See [drought definitions and verification](ensemble_review/EVENTS_AND_FORECASTS.md#hydrological-drought-task).
+
 The **Complexity routing method** setting in **Training hyperparameters** selects
 Morse (the default), PH, Takens, or Lyapunov for soft/hard routing and distillation.
 PH scores persistent H₁ loops in delay-embedded discharge. Takens scores the
@@ -238,7 +249,17 @@ complexity-ensemble-worker --settings api-server.json
 
 Open **http://127.0.0.1:7860**. The workspace includes experiment configuration,
 catchment selection, progress/cancellation, a run library with charts and downloads,
-comparisons, rainfall replay/GIF export, and paved-site scenarios. Configuration
+comparisons, rainfall replay/GIF export, and paved-site scenarios.
+
+Use **Data source** above the catchment map to choose **CAMELS-CH**, **BAFU only**,
+or **BAFU + CAMELS predictors**. The map and list follow station compatibility;
+unavailable catchments show a reason and cannot be selected. BAFU availability
+here checks local station metadata and catchment area, plus CAMELS predictor
+availability in combined mode. **Check benchmark coverage** audits daily discharge
+and date windows. BAFU setup validation and submission also run this audit before
+queueing; strict cohorts with incomplete coverage are rejected.
+
+Configuration
 drafts are saved in browser local storage; an active job reconnects after refreshing
 the same tab. Result charts let you select a catchment and forecast lead day, with
 time series averaged across seeds. Complete predictions remain in the exports.
@@ -281,3 +302,9 @@ Open `http://127.0.0.1:8000/docs`. Set `RUNOFF_API_TOKEN` for authenticated
 integration. Health and OpenAPI work before datasets are available.
 See [the API guide](ensemble_review/API.md) for requests, deployment settings,
 job lifecycle, storage, and remote Gradio/CLI execution.
+
+## BAFU extreme-flow benchmarking
+
+The API workspace supports BAFU-only and combined predictor experiments,
+read-only coverage audits, fixed evaluation fingerprints and shared flood
+verification. See [BAFU benchmarks](ensemble_review/BAFU_BENCHMARKS.md).

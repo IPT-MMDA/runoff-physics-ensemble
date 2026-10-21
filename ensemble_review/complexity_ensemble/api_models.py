@@ -10,6 +10,7 @@ import types
 from pydantic import (BaseModel, ConfigDict, Field, StrictBool, StrictFloat,
                       StrictInt, StrictStr, create_model)
 
+from .benchmarks import BenchmarkConfig
 from .regional import (BasinScopeConfig, HyperparameterConfig, ModelArchitectureConfig,
                        TrainingStrategyConfig, PhysicsModelConfig, ExtremeEventConfig, ForecastConfig)
 from .estreams import ESTREAMS_DYNAMIC_FEATURES
@@ -55,6 +56,7 @@ Hyperparameters = configuration_model(HyperparameterConfig)
 Physics = configuration_model(PhysicsModelConfig)
 Extremes = configuration_model(ExtremeEventConfig)
 Forecast = configuration_model(ForecastConfig)
+Benchmark = configuration_model(BenchmarkConfig)
 
 
 class DateRangeRequest(Contract):
@@ -77,6 +79,7 @@ class ExperimentConfiguration(Contract):
     physics: Physics = Field(default_factory=Physics)
     extremes: Extremes = Field(default_factory=Extremes)
     forecast: Forecast = Field(default_factory=Forecast)
+    benchmark: Benchmark = Field(default_factory=Benchmark)
     estreams_features: tuple[str, ...] = ESTREAMS_DYNAMIC_FEATURES
     camels_chem_features: tuple[str, ...] = DEFAULT_CAMELS_CH_CHEM_FEATURES
     camels_state_features: tuple[str, ...] = ()
@@ -152,6 +155,9 @@ class RunResponse(Contract):
     routing_diagnostics: dict
     loss_traces: dict[str, list[float | None]]
     extreme_events: list[dict]
+    drought_details: dict = Field(default_factory=dict)
+    drought_summary: dict = Field(default_factory=dict)
+    flood_summary: dict = Field(default_factory=dict)
     failures: list[str]
     parameter_count: int
     runtime_seconds: float

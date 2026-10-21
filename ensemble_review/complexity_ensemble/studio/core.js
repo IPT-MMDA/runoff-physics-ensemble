@@ -2,6 +2,23 @@
 export const terminal = status => ["succeeded", "failed", "cancelled"].includes(status);
 export const pretty = key => key.replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
 export const finite = value => typeof value === "number" && Number.isFinite(value);
+export function useBenchmarkCoverage(config, report) {
+  if (!report.effective_targets?.length || !report.training_basins?.length) {
+    throw new Error("No usable target or training stations. Adjust the dates or input history and check coverage again.");
+  }
+  return { ...config, basins: { ...config.basins,
+    target_basins: [...report.effective_targets],
+    eligible_basins: [...new Set([...report.training_basins, ...report.effective_targets])],
+  } };
+}
+export function basinCompatibilityLoaded(rows, mode = "none") {
+  return mode === "none" || rows.every(row => typeof row.compatibility?.[mode]?.eligible === "boolean");
+}
+export function basinAvailability(row, mode = "none") {
+  return mode === "none"
+    ? { eligible: row.eligible, reasons: row.eligible ? [] : ["CAMELS predictors unavailable"] }
+    : row.compatibility?.[mode] || { eligible: false, reasons: ["BAFU compatibility unavailable"] };
+}
 export function format(value) {
   if (value == null || (typeof value === "number" && !finite(value))) return "—";
   if (typeof value !== "number") return String(value);

@@ -49,21 +49,22 @@ def hydrology_morse_gradient(
     feature_count = len(feature_names)
     if flat_inputs.ndim != 2 or flat_inputs.shape[1] != sequence_length * feature_count:
         raise ValueError("flat hydrology inputs have an unexpected shape")
-    required = {"precipitation", "pet", "previous_discharge"}
-    if not required.issubset(feature_names):
-        raise ValueError(f"hydrology features must contain {sorted(required)}")
+    if "previous_discharge" not in feature_names:
+        raise ValueError("hydrology features must contain previous_discharge")
     values = flat_inputs.reshape(-1, sequence_length, feature_count)
     gradient = torch.zeros_like(values)
-    precipitation_index = feature_names.index("precipitation")
-    pet_index = feature_names.index("pet")
     flow_index = feature_names.index("previous_discharge")
     recency = torch.linspace(0.25, 1.0, sequence_length, device=values.device, dtype=values.dtype)
-
-    wetness = values[:, :, precipitation_index] - values[:, :, pet_index]
-    gradient[:, :, precipitation_index] += recency * wetness
-    gradient[:, :, pet_index] -= recency * wetness
     gradient[:, :, flow_index] += recency * values[:, :, flow_index]
-    for index in (precipitation_index, flow_index):
+    difference_indices = [flow_index]
+    if {"precipitation", "pet"}.issubset(feature_names):
+        precipitation_index = feature_names.index("precipitation")
+        pet_index = feature_names.index("pet")
+        wetness = values[:, :, precipitation_index] - values[:, :, pet_index]
+        gradient[:, :, precipitation_index] += recency * wetness
+        gradient[:, :, pet_index] -= recency * wetness
+        difference_indices.append(precipitation_index)
+    for index in difference_indices:
         differences = values[:, 1:, index] - values[:, :-1, index]
         gradient[:, 1:, index] += difference_weight * differences
         gradient[:, :-1, index] -= difference_weight * differences
@@ -202,6 +203,26 @@ class _FlattenedExpert(nn.Module):
         return self.expert(flattened)
 
 
+class HydrologyLSTMExpert(nn.Module):
+    """Deterministic reference architecture under the shared task contract.
+
+    This is a reference LSTM, not a claim to reproduce a published model.
+    """
+    def __init__(self, feature_count, *, hidden_dim=64, num_layers=1, static_dim=0):
+        super().__init__()
+        self.static_dim = static_dim
+        self.sequence = nn.LSTM(feature_count + static_dim, hidden_dim, num_layers, batch_first=True)
+        self.head = nn.Linear(hidden_dim, 1)
+
+    def forward(self, inputs, static_inputs=None):
+        if self.static_dim:
+            if static_inputs is None:
+                raise ValueError("static_inputs are required")
+            inputs = torch.cat((inputs, static_inputs[:, None, :].expand(-1, inputs.shape[1], -1)), -1)
+        output, _ = self.sequence(inputs)
+        return self.head(output[:, -1])
+
+
 def build_hydrology_complex_expert(
     kind: str,
     sequence_length: int,
@@ -215,6 +236,8 @@ def build_hydrology_complex_expert(
         return _FlattenedExpert(
             MLPExpert(sequence_length * feature_count + static_dim, 1, **kwargs), static_dim
         )
+    if kind == "lstm":
+        return HydrologyLSTMExpert(feature_count, static_dim=static_dim, **kwargs)
     if kind == "pinnmamba":
         return HydrologyPINNMambaExpert(feature_count, static_dim=static_dim, **kwargs)
     raise ValueError("complex_kind must be 'mlp' or 'pinnmamba'")
@@ -224,6 +247,7 @@ class _HydrologyModelBase(nn.Module):
     def __init__(self, discharge_scale: float | torch.Tensor, feature_names: Sequence[str]) -> None:
         super().__init__()
         self.feature_names = tuple(feature_names)
+        self.physics_available = {"precipitation", "pet"}.issubset(feature_names)
         self.register_buffer("discharge_scale", torch.as_tensor(discharge_scale).reshape(()).float())
         self.raw_response = nn.Parameter(torch.tensor(0.0))
         self.raw_recession = nn.Parameter(torch.tensor(-2.0))
@@ -242,6 +266,8 @@ class _HydrologyModelBase(nn.Module):
         return 2.0 * torch.sigmoid(self.raw_response), torch.sigmoid(self.raw_recession)
 
     def physics_residual(self, prediction: torch.Tensor, physical_inputs: torch.Tensor) -> torch.Tensor:
+        if not self.physics_available:
+            return prediction.squeeze(-1) * 0
         precipitation = physical_inputs[:, -1, self.feature_names.index("precipitation")]
         pet = physical_inputs[:, -1, self.feature_names.index("pet")]
         previous_flow = physical_inputs[:, -1, self.feature_names.index("previous_discharge")]

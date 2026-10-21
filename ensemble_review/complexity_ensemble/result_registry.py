@@ -23,6 +23,10 @@ DEFAULT_RESULTS_DIRECTORY = Path("artifacts/hydrology/run_registry")
 # are read from resolved configs, so the registry does not need to know which
 # front end produced a run.
 FILTER_FIELDS: tuple[tuple[str, str], ...] = (
+    ("benchmark.mode", "Benchmark data setting"),
+    ("benchmark.target", "BAFU target statistic"),
+    ("benchmark.threshold_source", "Benchmark threshold source"),
+    ("benchmark_manifest.evaluation_fingerprint", "Evaluation cohort fingerprint"),
     ("strategy.approach", "Approach"),
     ("model.complex_expert", "Complex expert"),
     ("model.simple_expert", "Simple expert"),
@@ -36,6 +40,11 @@ FILTER_FIELDS: tuple[tuple[str, str], ...] = (
     ("hyperparameters.learning_rate", "Learning rate"),
     ("hyperparameters.training_noise", "Training noise"),
     ("extremes.mode", "Extreme-event mode"),
+    ("extremes.drought_definition", "Drought threshold"),
+    ("extremes.drought_smoothing", "Drought smoothing"),
+    ("extremes.drought_quantile", "Drought seasonal quantile"),
+    ("extremes.drought_calendar_window", "Drought calendar window"),
+    ("extremes.drought_minimum_days", "Minimum drought days"),
     ("forecast.mode", "Forecast setup"),
     ("forecast.horizon_days", "Rolling horizon"),
 )
@@ -98,6 +107,7 @@ class SavedRun:
     runtime_seconds: float
     cancelled: bool
     forecast_metrics: dict[str, dict[str, float | int]] = field(default_factory=dict)
+    drought_details: dict[str, list[dict[str, object]]] = field(default_factory=dict)
 
     def value(self, field: str) -> str:
         return display_value(_nested(self.config, field))
@@ -146,6 +156,7 @@ def save_run(result: ExperimentResult, directory: str | Path = DEFAULT_RESULTS_D
             "loss_traces": result.loss_traces,
             "extreme_events": result.extreme_events,
             "forecast_metrics": result.forecast_metrics,
+            "drought_details": result.drought_details,
             "failures": result.failures,
             "parameter_count": result.parameter_count,
             "runtime_seconds": result.runtime_seconds,
@@ -183,6 +194,7 @@ def load_run(path: str | Path) -> SavedRun:
         int(payload.get("parameter_count", 0)), float(payload.get("runtime_seconds", 0.0)),
         bool(payload.get("cancelled", False)),
         {str(key): dict(value) for key, value in payload.get("forecast_metrics", {}).items()},
+        {str(key): list(value) for key, value in payload.get("drought_details", {}).items()},
     )
 
 

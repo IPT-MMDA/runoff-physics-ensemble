@@ -108,6 +108,7 @@ class SavedRun:
     cancelled: bool
     forecast_metrics: dict[str, dict[str, float | int]] = field(default_factory=dict)
     drought_details: dict[str, list[dict[str, object]]] = field(default_factory=dict)
+    hanze_details: dict[str, object] = field(default_factory=dict)
 
     def value(self, field: str) -> str:
         return display_value(_nested(self.config, field))
@@ -157,6 +158,7 @@ def save_run(result: ExperimentResult, directory: str | Path = DEFAULT_RESULTS_D
             "extreme_events": result.extreme_events,
             "forecast_metrics": result.forecast_metrics,
             "drought_details": result.drought_details,
+            "hanze_details": result.hanze_details,
             "failures": result.failures,
             "parameter_count": result.parameter_count,
             "runtime_seconds": result.runtime_seconds,
@@ -195,6 +197,7 @@ def load_run(path: str | Path) -> SavedRun:
         bool(payload.get("cancelled", False)),
         {str(key): dict(value) for key, value in payload.get("forecast_metrics", {}).items()},
         {str(key): list(value) for key, value in payload.get("drought_details", {}).items()},
+        dict(payload.get("hanze_details", {})),
     )
 
 

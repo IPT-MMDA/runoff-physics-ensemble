@@ -2,6 +2,16 @@
 export const terminal = status => ["succeeded", "failed", "cancelled"].includes(status);
 export const pretty = key => key.replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
 export const finite = value => typeof value === "number" && Number.isFinite(value);
+export function configureBafuTask(config) {
+  const next = structuredClone(config);
+  if (next.benchmark.mode === "none") return next;
+  if (next.extremes.mode !== "drought") next.extremes.mode = "statistical";
+  if (next.extremes.mode === "drought") {
+    next.benchmark.target = "daily_mean";
+    next.benchmark.threshold_source = "training_quantile";
+  }
+  return next;
+}
 export function useBenchmarkCoverage(config, report) {
   if (!report.effective_targets?.length || !report.training_basins?.length) {
     throw new Error("No usable target or training stations. Adjust the dates or input history and check coverage again.");
@@ -76,4 +86,60 @@ export async function allPages(fetchPage, pageSize = 1000) {
     if (items.length >= page.total) return items;
     if (!page.items.length) throw new Error("The server returned an incomplete page. Please retry.");
   }
+}
+
+// Event scores use the one-to-one verifier, never the duplicated per-lead day rows.
+export const floodMetricDefinitions = [
+  { key: "event_precision", label: "Event precision", percent: true, higher: true },
+  { key: "event_recall", label: "Event recall", percent: true, higher: true },
+  { key: "event_far", label: "Event FAR", percent: true, higher: false },
+  { key: "peak_magnitude_mae_mm_day", label: "Peak magnitude MAE (mm/day)", higher: false },
+  { key: "peak_timing_mae_days", label: "Peak timing MAE (days)", higher: false },
+];
+export function floodPerformance(rows) {
+  const groups = new Map();
+  for (const row of rows || []) {
+    if (row.event_type !== "statistical_high_flow" || row.verifier !== "high_flow_one_to_one_v1" || row.lead_day != null) continue;
+    const values = { ...row, event_far: finite(row.predicted_events) && row.predicted_events > 0 && finite(row.matched_events)
+      ? (row.predicted_events - row.matched_events) / row.predicted_events : null };
+    if (!groups.has(row.basin_id)) groups.set(row.basin_id, []);
+    groups.get(row.basin_id).push(values);
+  }
+  const average = values => Object.fromEntries(floodMetricDefinitions.map(({ key }) => {
+    const valid = values.map(row => row[key]).filter(finite);
+    return [key, { value: valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null, count: valid.length }];
+  }));
+  const basins = new Map([...groups].map(([id, values]) => [id, average(values)]));
+  const overall = average([...basins.values()].map(scores => Object.fromEntries(
+    floodMetricDefinitions.map(({ key }) => [key, scores[key].value]))));
+  return { basins, overall };
+}
+export function floodScoreText(value, definition) {
+  return !finite(value) ? "—" : definition.percent ? `${format(value * 100)}%` : format(value);
+}
+export function floodScoreColor(value, definition, maximum = 1) {
+  if (!finite(value)) return "#d8dde3";
+  const fraction = Math.min(1, Math.max(0, definition.percent ? value : value / (maximum || 1)));
+  const quality = definition.higher ? fraction : 1 - fraction;
+  return `hsl(${Math.round(quality * 120)}, 55%, 48%)`;
+}
+
+export const hanzeMetricDefinitions = [
+  { key: "catalogue_precision", label: "HANZE catalogue-linked precision", percent: true, higher: true },
+  { key: "catalogue_recall", label: "HANZE catalogue-linked recall", percent: true, higher: true },
+];
+export function hanzePerformance(rows, lead) {
+  const groups = new Map();
+  for (const row of rows || []) {
+    if (row.status !== "evaluated" || String(row.lead_day) !== String(lead)) continue;
+    if (!groups.has(row.basin_id)) groups.set(row.basin_id, []);
+    groups.get(row.basin_id).push(row);
+  }
+  const average = values => Object.fromEntries(hanzeMetricDefinitions.map(({ key }) => {
+    const valid = values.map(row => row[key]).filter(finite);
+    return [key, { value: valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null, count: valid.length }];
+  }));
+  const basins = new Map([...groups].map(([id, values]) => [id, average(values)]));
+  return { basins, overall: average([...basins.values()].map(scores => Object.fromEntries(
+    hanzeMetricDefinitions.map(({ key }) => [key, scores[key].value])))) };
 }

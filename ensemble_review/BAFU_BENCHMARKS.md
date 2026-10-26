@@ -25,13 +25,26 @@ it does not yet discover arbitrary BAFU stations outside CAMELS-CH.
 
 In the custom workspace, open **BAFU benchmark**, select a mode, choose target
 stations, training scope and dates, and click **Check benchmark coverage**.
-Select statistical high-flow evaluation. Selecting a BAFU mode sets that task
-automatically. Selecting BAFU-only disables physics and clears external-feature
-selections. API clients must set these options explicitly.
+Choose **Event task → Drought events** or **High-flow events**. Existing setups
+retain high-flow evaluation unless drought is explicitly selected. Selecting
+BAFU-only disables physics and clears external-feature selections. API clients
+must set these options explicitly.
+
+For drought, the workspace selects daily mean discharge and training-fitted
+thresholds. Choose **Forecasting → Rolling** and a horizon long enough to study
+the event of interest. One-day forecasts support next-day drought warnings;
+duration, recovery and deficit of a complete event require a trajectory covering
+that event. Forecast boundaries are marked as censored, not complete events.
 
 Preflight displays split counts, thresholds, exclusions, and an audit download.
 It shares observation loading and window eligibility with execution, but counts
 windows without materializing the training sequence tensors or fitting models.
+For drought it also checks seven-day observation windows, training calendar
+references and the selected issue/horizon policy using the production verifier.
+The audit reports eligible and excluded drought days by station. Stations with
+no evaluable drought days fail before queueing. **Use stations with complete
+coverage** applies the audit's usable targets and training pool without disabling
+strict cohort checks.
 **Pin this evaluation for future runs** stores its SHA-256 fingerprint. Export
 that setup, change architecture or data mode, and retain the fingerprint to
 require the same evaluation target observations, dates, thresholds, day alignment,
@@ -82,6 +95,37 @@ are different experiments. Registry filters expose benchmark mode, target,
 threshold source, and evaluation fingerprint.
 
 ## Thresholds and the statistics ZIP
+
+### Drought
+
+Set `extremes.mode: "drought"`, `benchmark.target: "daily_mean"` and
+`benchmark.threshold_source: "training_quantile"`. Daily maxima and official
+flood return levels are rejected for this task. Other `extremes.definition`
+settings belong to high-flow scoring and do not change drought thresholds.
+
+The shared drought verifier applies either a seasonal low-flow quantile
+(`drought_definition: "seasonal_quantile"`, default probability 0.15) or a
+fixed Q347 estimate (`"q347"`). Both references use training observations only.
+It compares observed and predicted seven-day mean discharge against the fitted
+threshold. Trailing smoothing uses the current and six preceding days. Centred
+smoothing requires a rolling horizon of at least four days and cannot score the
+last three leads in each issue. Post-issue observed discharge never enters the
+predicted smoothing window.
+
+Results show a drought threshold chart and day detection scores for the selected
+station and lead. The event table and exports include onset, recovery, duration
+and deficit errors where boundaries permit evaluation. Downloads are
+`drought_metrics.csv`, `drought_days.csv`, `drought_events.csv`, and
+`benchmark_manifest.json`; drought runs do not produce a flood-score file.
+The manifest stores the low-flow thresholds and drought settings. Its evaluation
+fingerprint includes smoothing context and event policy, so drought and high-flow
+runs cannot be treated as the same benchmark. See
+[bafu_drought.json](examples/benchmarks/bafu_drought.json) for an example request.
+
+These additions apply when a BAFU source and drought task are selected. The
+CAMELS-CH rainfall–runoff input, training, physics and event defaults are unchanged.
+
+### High flow
 
 Default high-flow thresholds are training-period station quantiles, Q95 by
 default. Threshold fitting is independent of validation/test values and models.

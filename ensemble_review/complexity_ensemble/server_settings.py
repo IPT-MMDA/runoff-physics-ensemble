@@ -16,6 +16,7 @@ class DatasetRegistration:
     bafu_root: Path | None = None
     bafu_statistics_zip: Path | None = None
     bafu_return_levels: Path | None = None
+    hanze_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -48,7 +49,7 @@ class ServerSettings:
         for key, value in raw.get("datasets", {}).items():
             if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", key):
                 raise ValueError("dataset IDs must contain only letters, numbers, underscores, or hyphens")
-            if set(value) - {"data_root", "estreams_root", "camels_chem_root", "hyd_responses_root", "bafu_root", "bafu_statistics_zip", "bafu_return_levels"}:
+            if set(value) - {"data_root", "estreams_root", "camels_chem_root", "hyd_responses_root", "bafu_root", "bafu_statistics_zip", "bafu_return_levels", "hanze_root"}:
                 raise ValueError(f"unknown dataset settings for {key}")
             datasets[key] = DatasetRegistration(
                 local(value["data_root"]),
@@ -58,6 +59,7 @@ class ServerSettings:
                 local(value["bafu_root"]) if value.get("bafu_root") else None,
                 local(value["bafu_statistics_zip"]) if value.get("bafu_statistics_zip") else None,
                 local(value["bafu_return_levels"]) if value.get("bafu_return_levels") else None,
+                local(value["hanze_root"]) if value.get("hanze_root") else None,
             )
         return cls(local(raw.get("storage_dir", "artifacts/api")), datasets,
                    local(raw["results_dir"]) if raw.get("results_dir") else None,

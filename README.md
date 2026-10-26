@@ -251,6 +251,39 @@ Open **http://127.0.0.1:7860**. The workspace includes experiment configuration,
 catchment selection, progress/cancellation, a run library with charts and downloads,
 comparisons, rainfall replay/GIF export, and paved-site scenarios.
 
+Completed BAFU high-flow runs include **Flood event performance** in the Run library.
+The Swiss catchment map can display event precision, event recall, event false-alarm
+ratio (FAR), peak magnitude MAE (mm/day), or peak timing MAE (days). These are
+historical verification scores, not flood probabilities. Catchment scores average
+available seeds; the run average gives each catchment equal weight and reports
+contributing counts. Peak errors exclude boundary-censored events. Scores cover
+the full test period and all forecast leads, independently of the discharge lead
+selector. Existing saved runs with the one-to-one flood verifier can be viewed
+without retraining; unavailable scores appear as a dash and grey map areas.
+
+BAFU high-flow results also include **Documented floods · HANZE** when the server
+registration has `"hanze_root": "../datasets/hanze"`. Restart both studio and worker
+after changing server settings. Existing saved runs can be evaluated when opened;
+new runs save the report in `hanze_evaluation.json` and the archive. The map metric
+selector includes HANZE catalogue-linked precision and recall, with per-catchment
+scores, equal-catchment run means, and event matching/coverage details. For rolling runs, these scores default to **Rolling blocks · all leads**, joining
+the saved forecast blocks into one daily series per seed. This mixes forecast
+leads according to the saved schedule; overlapping blocks use the shortest available
+lead per target date. The HANZE forecast-series selector also exposes individual
+leads, which may be sparse and fail complete-window coverage. `GET /api/v1/runs/{run_id}/hanze` returns the report.
+
+HANZE is an impact catalogue, not a complete gauge-level flood-label dataset. The
+initial integration uses Swiss `River` records only and assigns gauges to reported
+cantons using gauge coordinates. Each complete predicted high-flow spell can match
+at most one documented event by exact date overlap. Recall requires the entire
+catalogue event window to have finite predictions and observations. Boundary/gap
+forecasts and forecasts overlapping excluded catalogue windows are excluded from
+precision. Unlinked forecasts are **not confirmed false alarms**. Missing catalogue
+events, unmapped gauges, or insufficient coverage produce unavailable scores, not
+assumed negatives. For a documented case, HANZE event `1466` covers 19–26 August
+2005 in multiple Swiss cantons; the test period must cover the complete event and
+surrounding days. Select stations in the affected cantons and verify BAFU coverage.
+
 Use **Data source** above the catchment map to choose **CAMELS-CH**, **BAFU only**,
 or **BAFU + CAMELS predictors**. The map and list follow station compatibility;
 unavailable catchments show a reason and cannot be selected. BAFU availability
@@ -258,6 +291,14 @@ here checks local station metadata and catchment area, plus CAMELS predictor
 availability in combined mode. **Check benchmark coverage** audits daily discharge
 and date windows. BAFU setup validation and submission also run this audit before
 queueing; strict cohorts with incomplete coverage are rejected.
+
+For BAFU drought experiments, choose **BAFU benchmark → Event task → Drought
+events**. Predictions remain daily discharge; seven-day low flows are evaluated
+as drought days and events using thresholds fitted only to training observations.
+Use **Forecasting → Rolling** for multi-day trajectories. Results include a
+drought threshold chart and drought day, event and score exports. CAMELS-CH
+rainfall–runoff defaults remain unchanged. See
+[BAFU drought settings](ensemble_review/BAFU_BENCHMARKS.md#drought).
 
 Configuration
 drafts are saved in browser local storage; an active job reconnects after refreshing

@@ -83,3 +83,21 @@ class Application:
 
     def catalog_for_run(self, run_id):
         return self.catalog(self.dataset_for_run(run_id))
+
+    def evaluate_hanze(self, dataset_id, predictions, config):
+        root = self.registration(dataset_id).hanze_root
+        if root is None:
+            return {"status": "not_configured", "message": "HANZE is not configured for this dataset."}
+        if config.get("benchmark", {}).get("mode", "none") == "none" or config.get("extremes", {}).get("mode") != "statistical":
+            return {"status": "not_applicable", "message": "HANZE evaluation applies to BAFU high-flow runs."}
+        from .hanze import evaluate_run
+        return evaluate_run(root, predictions, config, self.catalog(dataset_id))
+
+    def hanze_for_run(self, run_id):
+        run = self.runs.get(run_id)
+        from .hanze import VERSION
+        if run.hanze_details and (run.hanze_details.get("status") != "available" or run.hanze_details.get("verification") == VERSION):
+            return run.hanze_details
+        if run.config.get("benchmark", {}).get("mode", "none") == "none" or run.config.get("extremes", {}).get("mode") != "statistical":
+            return {"status": "not_applicable", "message": "HANZE evaluation applies to BAFU high-flow runs."}
+        return self.evaluate_hanze(self.dataset_for_run(run_id), self.runs.predictions(run_id), run.config)

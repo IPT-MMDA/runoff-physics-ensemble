@@ -312,3 +312,26 @@ that remains a separate model-serving feature.
 See [BAFU_BENCHMARKS.md](BAFU_BENCHMARKS.md) for BAFU-only and combined-data
 configuration, read-only preflight, the browser controls, reference baselines,
 verified threshold imports, provenance artifacts and comparison contracts.
+
+## HANZE documented-event evaluation
+
+Register `hanze_root` in a server dataset entry (see `api-server.example.json`).
+`GET /api/v1/runs/{run_id}/hanze` returns a saved report for new runs or evaluates
+existing saved BAFU high-flow predictions without retraining. The authenticated
+endpoint returns `status`, provenance with source file hashes, matching policy,
+`basin_regions`, per-seed/per-lead `metrics`, catalogue `events` with exclusions and
+matches, and `predicted_events`. Status can be `available`, `not_configured`,
+`not_applicable`, or a worker-persisted `error`.
+
+`GET /api/v1/runs/{run_id}/artifacts/hanze` downloads the same JSON; available reports
+are also included in the public archive. Reports contain no server dataset paths.
+Precision means catalogue-linked complete predicted events / complete predicted
+events; recall means detected eligible regional catalogue events / eligible events.
+This is regional catalogue agreement, not gauge-level impact classification. An
+unlinked forecast must not be interpreted as a confirmed false alarm. Undefined
+ratios are JSON null. The UI averages defined seed ratios within catchments and
+then gives each catchment equal weight, separately for each selected forecast series. Rolling runs also provide scope
+`all`, which joins scheduled rolling blocks per seed (shortest lead per date if
+blocks overlap). This is mixed-lead schedule verification, not fixed-lead skill.
+Fixed leads remain separate and may lack daily event coverage. Reports from older
+verifier versions are recomputed on access using saved predictions.

@@ -141,6 +141,7 @@ class RunRepository:
             runtime_seconds=run.runtime_seconds, cancelled=run.cancelled,
             forecast_metrics=run.forecast_metrics,
             drought_details=run.drought_details,
+            hanze_details=run.hanze_details,
         )
 
 

@@ -1,4 +1,4 @@
-import { allPages, basinAvailability, basinCompatibilityLoaded, coerce, finite, format, meanByDate, pretty, terminal, useBenchmarkCoverage } from "./core.js";
+import { allPages, hanzeMetricDefinitions, hanzePerformance, floodMetricDefinitions, floodPerformance, floodScoreText, floodScoreColor, basinAvailability, basinCompatibilityLoaded, coerce, configureBafuTask, finite, format, meanByDate, pretty, terminal, useBenchmarkCoverage } from "./core.js";
 import { BasinAtlas, chart } from "./charts.js?v=fixed-sky-blue-1";
 
 const $ = selector => document.querySelector(selector);
@@ -94,11 +94,18 @@ function renderConfig() {
     for (const key of keys) field(essential, key, state.config[group][key], schemaFor(group).properties[key], [group, key], state.bindings, key === "device" ? state.capabilities.device_choices : undefined);
   }
   const benchmark = section("BAFU benchmark", "02", true);
-  benchmark.append(el("p", { class: "field-full field-hint", text: "Compare BAFU-only and combined predictors on the same target stations and dates. BAFU-only requires physics weight 0 and excludes optional predictors. A reference LSTM is available under No routing. Preflight reads data without starting training." }));
+  benchmark.append(el("p", { class: "field-full field-hint", text: "Forecast river discharge, then evaluate drought or high-flow events. Drought uses seven-day mean flow below training-fitted low-flow thresholds. BAFU-only uses past discharge and the calendar, without rainfall inputs. Choose Rolling under Forecasting for multi-day event trajectories; one-day runs evaluate daily warnings. Preflight checks coverage without training." }));
+  if (state.config.benchmark.mode !== "none") {
+    const task = field(benchmark, "event_task", state.config.extremes.mode, { type: "string" }, ["extremes", "mode"], state.bindings, ["statistical", "drought"]);
+    setOptions(task, [{ value: "statistical", label: "High-flow events" }, { value: "drought", label: "Drought events" }], state.config.extremes.mode);
+    task.addEventListener("change", action(() => changeSource()));
+  }
   for (const [key, schema] of Object.entries(schemaFor("benchmark").properties)) {
     if (key === "mode") continue;
     const input = field(benchmark, key, state.config.benchmark?.[key] ?? schema.default, schema, ["benchmark", key], state.bindings);
     if (key === "target") input.addEventListener("change", action(() => changeSource()));
+    if (state.config.benchmark.mode !== "none" && state.config.extremes.mode === "drought"
+        && ["target", "threshold_source", "return_period_years"].includes(key)) input.disabled = true;
   }
   benchmark.append(el("button", { type: "button", class: "button secondary", text: "Check benchmark coverage", onclick: action(async () => {
     const checkedBody = requestBody(), checkedSnapshot = JSON.stringify(checkedBody);
@@ -107,7 +114,12 @@ function renderConfig() {
     const node = $("#benchmark-report"), report = output.manifest;
     node.replaceChildren(el("p", { text: `${output.valid ? "Ready" : "Incomplete cohort"} · ${report.effective_targets.length} target stations · ${report.forecast_interpretation}` }));
     renderTable(node, Object.entries(report.samples).map(([split, samples]) => ({ split, samples })));
-    renderTable(node, Object.entries(report.thresholds_mm_day).map(([station, threshold]) => ({ station, threshold_mm_day: threshold })));
+    if (report.drought_coverage) {
+      renderTable(node, Object.entries(report.drought_coverage).map(([station, counts]) => ({ station, ...counts })));
+      renderTable(node, Object.entries(report.thresholds_mm_day).map(([station, threshold]) => ({ station,
+        definition: threshold.definition, fixed_threshold_mm_day: threshold.fixed,
+        seasonal_calendar_days: Object.keys(threshold.seasonal).length })));
+    } else renderTable(node, Object.entries(report.thresholds_mm_day).map(([station, threshold]) => ({ station, threshold_mm_day: threshold })));
     if (Object.keys(report.excluded_basins).length || report.provenance.missing_stations?.length) {
       const excluded = el("div"); node.append(excluded); renderData(excluded, { excluded: report.excluded_basins, missing: report.provenance.missing_stations });
       if (report.effective_targets.length && report.training_basins.length) node.append(el("button", {
@@ -148,6 +160,7 @@ function renderConfig() {
       "Drought mode uses HYD-RESPONSES-style definitions with training-fitted thresholds on the experiment's observed discharge. Water-state predictors are optional and selected separately below. Drought day, event and metric CSVs are included in the run archive. Existing event modes keep their original scoring." }));
     for (const [key, schema] of Object.entries(schemaFor(group).properties)) {
       if (remaining[group]?.includes(key)) continue;
+      if (group === "extremes" && key === "mode" && state.config.benchmark.mode !== "none") continue;
       const options = key === "mode" ? group === "forecast" ? ["one_day", "rolling"] : ["none", "statistical", "event_based", "drought"] : undefined;
       field(grid, key, state.config[group][key] ?? schema.default, schema, [group, key], state.bindings, options);
     }
@@ -170,7 +183,7 @@ function renderConfig() {
 function changeSource(mode = $("#data-source").value) {
   const body = requestBody(); state.config = body.config; state.flags = body;
   state.config.benchmark.mode = mode;
-  if (mode !== "none") state.config.extremes.mode = "statistical";
+  state.config = configureBafuTask(state.config);
   if (mode === "bafu_only" || (mode !== "none" && state.config.benchmark.target === "daily_max")) {
     state.config.hyperparameters.physics_weight = 0; state.config.physics.optimization_mode = "none";
   }
@@ -356,10 +369,135 @@ async function loadRuns(append = false) {
   state.runs = append ? [...state.runs, ...page.items] : page.items; state.totalRuns = page.total; renderRuns();
   if (page.invalid_entries) notice(`${page.invalid_entries} saved run entries could not be read. Other runs remain available.`);
 }
+const floodAtlas = new BasinAtlas($("#flood-map"), id => {
+  if (![...$("#result-basin").options].some(option => option.value === id)) return;
+  $("#result-basin").value = id;
+  action(renderPredictions)();
+});
+setOptions($("#flood-map-metric"), floodMetricDefinitions.map(metric => ({ value: metric.key, label: metric.label })));
+function floodCards(node, scores, unit, definitions = floodMetricDefinitions) {
+  node.replaceChildren(...definitions.map(definition => {
+    const score = scores?.[definition.key];
+    return el("div", { class: "metric" }, el("span", { text: definition.label }),
+      el("strong", { text: floodScoreText(score?.value, definition) }),
+      el("span", { text: `${score?.count || 0} ${unit}` }));
+  }));
+}
+function renderFloodPerformance() {
+  const run = state.run;
+  let performance = floodPerformance(run?.extreme_events);
+  const show = Boolean(run?.config.benchmark_manifest) && run?.config.extremes?.mode !== "drought";
+  $("#flood-performance").hidden = !show;
+  if (!show) return;
+  const basin = $("#result-basin").value;
+  floodCards($("#flood-average"), performance.overall, "catchments");
+  floodCards($("#flood-selected"), performance.basins.get(basin), "seeds");
+  $("#flood-selected-title").textContent = `Catchment ${basin} · mean across seeds`;
+  const definition = [...floodMetricDefinitions, ...hanzeMetricDefinitions].find(metric => metric.key === $("#flood-map-metric").value);
+  if (hanzeMetricDefinitions.includes(definition)) performance = hanzePerformance(state.hanze?.report?.metrics, $("#hanze-scope").value || "1");
+  const maximum = definition.percent ? 1 : Math.max(0, ...[...performance.basins.values()].map(scores => scores[definition.key].value).filter(finite));
+  floodAtlas.setPerformance(new Map([...performance.basins].map(([id, scores]) => [id, {
+    color: floodScoreColor(scores[definition.key].value, definition, maximum),
+    label: `${definition.label}: ${floodScoreText(scores[definition.key].value, definition)}`,
+  }])));
+  floodAtlas.setSelected(new Set([basin]));
+  const upper = definition.percent ? "100%" : format(maximum);
+  $("#flood-map-legend").textContent = `${definition.label}: ${definition.higher ? `red = 0%, green = ${upper} (higher is better)` : `green = 0, red = ${upper} (lower is better)`}. Grey: no score. Selected catchment has a blue outline.`;
+  const ids = [...$("#result-basin").options].map(option => option.value);
+  const table = el("table", { class: "data-table" });
+  table.append(el("thead", {}, el("tr", {}, el("th", { text: "Catchment" }), ...floodMetricDefinitions.map(metric => el("th", { text: metric.label })))));
+  table.append(el("tbody", {}, ...ids.map(id => el("tr", {},
+    el("td", {}, el("button", { class: "button secondary", text: id, onClick: action(async () => { $("#result-basin").value = id; await renderPredictions(); }) })),
+    ...floodMetricDefinitions.map(metric => el("td", { text: floodScoreText(performance.basins.get(id)?.[metric.key]?.value, metric) }))))));
+  $("#flood-table").replaceChildren(table);
+  renderHanze();
+}
+function renderHanze() {
+  const report = state.hanze?.runId === state.run?.run_id ? state.hanze.report : null;
+  $("#hanze-performance").hidden = false;
+  $("#hanze-results").hidden = report?.status !== "available";
+  $("#hanze-status").textContent = report ? report.message || "" : "Loading documented flood evaluation…";
+  if (report?.status !== "available") return;
+  const lead = $("#hanze-scope").value || report.default_scope || "1", basin = $("#result-basin").value;
+  const scopeLabel = lead === "all" ? "rolling blocks · all leads" : `day ${lead}`;
+  const scores = hanzePerformance(report.metrics, lead);
+  floodCards($("#hanze-average"), scores.overall, "catchments", hanzeMetricDefinitions);
+  floodCards($("#hanze-selected"), scores.basins.get(basin), "seeds", hanzeMetricDefinitions);
+  const region = report.basin_regions?.[basin];
+  $("#hanze-average-title").textContent = `Run average · ${scopeLabel} · equal weight per catchment`;
+  $("#hanze-selected-title").textContent = `Catchment ${basin} · ${region?.region_name || region?.region || region?.reason || "unmapped"} · ${scopeLabel}`;
+  const selected = report.metrics.filter(row => row.basin_id === basin && String(row.lead_day) === lead);
+  $("#hanze-status").textContent = selected.length ? selected.map(row =>
+    `Seed ${row.seed}: ${row.eligible_events} eligible regional events, ${row.matched_events} matched, ${row.predicted_events} complete predicted events, ${row.unlinked_predicted_events} unlinked. Excluded: ${row.excluded_events} catalogue events, ${row.excluded_predicted_events} predicted events.${row.reason ? " " + row.reason : ""}`).join("\n") : "No evaluation rows for this catchment and lead.";
+  const ids = [...$("#result-basin").options].map(option => option.value);
+  const table = el("table", { class: "data-table" });
+  table.append(el("thead", {}, el("tr", {}, el("th", { text: "Catchment" }), ...hanzeMetricDefinitions.map(metric => el("th", { text: metric.label })))));
+  table.append(el("tbody", {}, ...ids.map(id => el("tr", {},
+    el("td", {}, el("button", { class: "button secondary", text: id, onClick: action(async () => { $("#result-basin").value = id; await renderPredictions(); }) })),
+    ...hanzeMetricDefinitions.map(metric => el("td", { text: floodScoreText(scores.basins.get(id)?.[metric.key]?.value, metric) }))))));
+  $("#hanze-table").replaceChildren(table);
+  $("#hanze-events").replaceChildren();
+  const events = report.events.filter(row => row.basin_id === basin && String(row.lead_day) === lead);
+  if (!events.length) $("#hanze-events").append(el("p", { class: "subtle", text: "No Swiss HANZE River events overlap this gauge’s mapped canton and test dates. Recall is unavailable. Choose a test period containing documented events to evaluate detection." }));
+  else renderTable($("#hanze-events"), events.map(row => ({
+    hanze_id: row.hanze_id, start: row.start, end: row.end, seed: row.seed,
+    result: !row.eligible ? `Excluded: ${row.exclusion_reason}` : row.matched ? "Detected (regional match)" : "Not detected",
+    predicted_start: row.predicted_start, predicted_end: row.predicted_end, predicted_peak_day: row.predicted_peak_day,
+    coverage: `${row.covered_event_days ?? "—"} / ${row.required_event_days ?? "—"} days`, sources: row.sources,
+  })));
+}
+async function loadHanze(run) {
+  try {
+    const report = await api(`/runs/${encodeURIComponent(run.run_id)}/hanze`);
+    if (state.run !== run) return;
+    state.hanze = { runId: run.run_id, report };
+    setOptions($("#hanze-scope"), (report.evaluation_scopes || ["1"]).map(scope => ({ value: scope,
+      label: scope === "all" ? "Rolling blocks · all leads" : `Day ${scope} only` })), report.default_scope || "1");
+    const definitions = report.status === "available" ? [...floodMetricDefinitions, ...hanzeMetricDefinitions] : floodMetricDefinitions;
+    setOptions($("#flood-map-metric"), definitions.map(metric => ({ value: metric.key, label: metric.label })));
+    renderFloodPerformance();
+  } catch (error) {
+    if (state.run !== run) return;
+    state.hanze = { runId: run.run_id, report: { status: "error", message: `HANZE evaluation unavailable: ${error.message}` } };
+    renderHanze();
+  }
+}
+bind("#hanze-scope", "change", renderFloodPerformance);
+bind("#download-hanze", "click", async () => {
+  downloadBlob(new Blob([JSON.stringify(state.hanze.report, null, 2)], { type: "application/json" }), "hanze_evaluation.json");
+});
+async function loadFloodMap(run) {
+  if ($("#flood-performance").hidden) return;
+  floodAtlas.setData([]);
+  $("#flood-map-empty").hidden = false; $("#flood-map-empty").textContent = "Loading catchment geometry…";
+  try {
+    const id = run.config.dataset_id;
+    if (!id) throw new Error("The saved run has no dataset identifier.");
+    const rows = state.datasetCache.get(id) || await allPages((offset, limit) => api(`/datasets/${encodeURIComponent(id)}/basins?offset=${offset}&limit=${limit}`));
+    if (state.run !== run) return;
+    state.datasetCache.set(id, rows);
+    const targets = new Set([...$("#result-basin").options].map(option => option.value));
+    // Keep the full Swiss atlas; only the run's catchments can be selected.
+    floodAtlas.setData(rows.map(row => ({ ...row, eligible: targets.has(row.basin_id) })));
+    $("#flood-map-empty").hidden = rows.some(row => row.geometry);
+    $("#flood-map-empty").textContent = "Catchment geometry is unavailable. Scores remain available below.";
+  } catch (error) {
+    if (state.run !== run) return;
+    $("#flood-map-empty").textContent = `Map unavailable: ${error.message} Scores remain available below.`;
+  }
+}
+bind("#flood-map-metric", "change", renderFloodPerformance);
 async function openRun(id) {
   const version = ++state.resultVersion;
   const run = await api(`/runs/${encodeURIComponent(id)}`); if (version !== state.resultVersion) return;
-  for (const name of ["benchmark_manifest", "flood_metrics"]) document.querySelector(`[data-download="${name}"]`).hidden = !run.config.benchmark_manifest;
+  const drought = run.config.extremes?.mode === "drought";
+  document.querySelector('[data-download="benchmark_manifest"]').hidden = !run.config.benchmark_manifest;
+  document.querySelector('[data-download="flood_metrics"]').hidden = !run.config.benchmark_manifest || drought;
+  for (const name of ["drought_metrics", "drought_days", "drought_events"]) document.querySelector(`[data-download="${name}"]`).hidden = !drought;
+  $("#drought-card").hidden = !drought; $("#event-metrics").hidden = !drought;
+  $("#run-title").textContent = drought ? "Discharge and drought forecasts" : run.config.benchmark_manifest ? "Discharge and high-flow forecasts" : "From rainfall to response";
+  state.hanze = null;
+  setOptions($("#flood-map-metric"), floodMetricDefinitions.map(metric => ({ value: metric.key, label: metric.label })));
   state.run = run; $("#run-detail").hidden = false; $("#detail-id").textContent = run.run_id;
   const basinIds = run.config.basins?.target_basins || Object.keys(run.per_basin_metrics);
   setOptions($("#result-basin"), basinIds);
@@ -369,12 +507,16 @@ async function openRun(id) {
   $("#promote-run").disabled = !state.bootstrap.leaderboard_enabled || run.cancelled;
   chart("#losses", Object.entries(run.loss_traces).map(([name, values]) => ({ name: pretty(name), points: values.map((y, x) => ({ x: x + 1, y })) })), { date: false });
   renderData($("#run-data"), { per_basin_metrics: run.per_basin_metrics, forecast_metrics: run.forecast_metrics, routing: run.routing_diagnostics, config: run.config });
-  renderTable($("#run-data"), run.extreme_events); renderRuns(); await renderPredictions();
+  renderTable($("#run-data"), run.extreme_events); renderRuns();
+  renderFloodPerformance();
+  await Promise.all([renderPredictions(), loadFloodMap(run),
+    $("#flood-performance").hidden ? Promise.resolve() : loadHanze(run)]);
   $("#run-detail").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 async function renderPredictions() {
   if (!state.run) return;
   const run = state.run, basin = $("#result-basin").value, lead = $("#result-lead").value || "1", version = ++state.resultVersion;
+  renderFloodPerformance();
   const cacheKey = `${run.run_id}/${basin}/${lead}`;
   for (const id of ["hydrograph", "scatter", "routing"]) { $("#" + id).replaceChildren(el("p", { class: "empty-state", text: "Loading catchment predictions…" })); }
   const rows = state.predictions.get(cacheKey) || await allPages((offset, limit) => api(`/runs/${encodeURIComponent(run.run_id)}/predictions?basin_id=${encodeURIComponent(basin)}&lead_day=${lead}&offset=${offset}&limit=${limit}`), 10000);
@@ -384,6 +526,19 @@ async function renderPredictions() {
   state.predictions.set(cacheKey, rows);
   metricCards($("#metric-cards"), run.per_basin_metrics[basin] || run.aggregate_metrics);
   chart("#hydrograph", [{ name: "Predicted", points: meanByDate(rows, "predicted_mm_day") }, { name: "Observed", points: meanByDate(rows, "observed_mm_day") }]);
+  if (run.config.extremes?.mode === "drought") {
+    const scores = run.extreme_events.filter(row => row.basin_id === basin && row.evaluation_scope === "lead" && String(row.lead_day) === lead);
+    const values = Object.fromEntries(["precision", "recall", "csi", "false_alarm_ratio", "m7_mae_mm_day"].map(key => {
+      const available = scores.map(row => row[key]).filter(finite);
+      return [key, available.length ? available.reduce((a, b) => a + b, 0) / available.length : null];
+    }));
+    metricCards($("#event-metrics"), values);
+    const days = (run.drought_details?.days || []).filter(row => row.basin_id === basin && String(row.lead_day) === lead && row.eligible)
+      .map(row => ({ ...row, target_date: row.date }));
+    chart("#drought-chart", [{ name: "Predicted seven-day mean", points: meanByDate(days, "predicted_m7_mm_day") },
+      { name: "Observed seven-day mean", points: meanByDate(days, "observed_m7_mm_day") },
+      { name: "Drought threshold", points: meanByDate(days, "threshold_mm_day") }]);
+  }
   chart("#routing", [{ name: "Complex expert weight", points: meanByDate(rows, "complex_weight") }]);
   chart("#scatter", [{ name: "Observed / predicted", points: rows.map(r => ({ x: r.observed_mm_day, y: r.predicted_mm_day })).sort((a, b) => a.x - b.x) }], { scatter: true, date: false, xLabel: "observed discharge", yLabel: "predicted discharge" });
 }

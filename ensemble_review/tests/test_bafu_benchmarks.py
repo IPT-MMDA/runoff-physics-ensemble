@@ -1,4 +1,4 @@
-"""Synthetic read/contract/verification tests. No training or experiment execution."""
+"""Synthetic BAFU read, contract and verification checks with a tiny CAMELS training regression."""
 import csv
 from dataclasses import asdict, replace
 from datetime import date, datetime, timedelta, timezone
@@ -164,6 +164,127 @@ class BAFUBenchmarks(unittest.TestCase):
         self.assertFalse(model.physics_available)
         self.assertEqual(float(model.physics_residual(torch.ones(2,1),x).sum()),0)
         self.assertEqual(hydrology_morse_gradient(x.flatten(1),sequence_length=3,feature_names=model.feature_names).shape,(2,9))
+
+    def drought_config(self, **settings):
+        return replace(self.config, extremes=replace(self.config.extremes, mode='drought', **settings))
+
+    def test_bafu_drought_validation_keeps_high_flow_and_camels_defaults(self):
+        self.config.validate()
+        self.drought_config().validate()
+        replace(self.drought_config(), benchmark=replace(self.config.benchmark, mode='bafu_combined')).validate()
+        with self.assertRaisesRegex(ValueError, 'daily_mean'):
+            replace(self.drought_config(), benchmark=replace(self.config.benchmark, target='daily_max')).validate()
+        with self.assertRaisesRegex(ValueError, 'flood return levels'):
+            replace(self.drought_config(), benchmark=replace(self.config.benchmark, threshold_source='official_return_level')).validate()
+        normal = replace(self.config, benchmark=BenchmarkConfig())
+        normal.validate()
+        self.assertEqual(normal.extremes.mode, 'statistical')
+        with patch('complexity_ensemble.bafu.load_observations', side_effect=AssertionError('CAMELS must not read BAFU')):
+            _, data, series, provenance = prepare_regional_data(normal, catalog=self.catalog)
+        self.assertIn('precipitation', data.feature_names)
+        self.assertTrue(data.static_feature_names)
+        self.assertEqual(float(series['2011'].discharge[0]), 999)
+        self.assertNotIn('adapter', provenance)
+
+    def test_drought_preflight_thresholds_identity_and_no_test_leakage(self):
+        config = self.drought_config(drought_definition='q347')
+        with patch('complexity_ensemble.regional.RoutedHydrologyModel', side_effect=AssertionError('No training')):
+            before = preflight(config, self.catalog)
+        self.assertIn('drought', before['evaluation']['verifier'])
+        self.assertGreater(before['drought_coverage']['2011']['eligible_days'], 0)
+        self.assertEqual(before['threshold_provenance']['source'], 'training_observations_only')
+        flood = preflight(self.config, self.catalog)
+        self.assertNotEqual(before['evaluation_fingerprint'], flood['evaluation_fingerprint'])
+        self.rows[-1]['value'] = '999'; self.write_rows()
+        after = preflight(config, self.catalog)
+        self.assertEqual(before['thresholds_mm_day'], after['thresholds_mm_day'])
+        self.assertEqual(before['training_fingerprint'], after['training_fingerprint'])
+        self.assertNotEqual(before['evaluation_fingerprint'], after['evaluation_fingerprint'])
+        rolling = replace(config, forecast=replace(config.forecast, mode='rolling', horizon_days=7))
+        reference = preflight(rolling, self.catalog)
+        for settings in ({'drought_minimum_days': 2}, {'drought_smoothing': 'centered'},
+                         {'drought_definition': 'seasonal_quantile'}, {'drought_quantile': .2},
+                         {'drought_calendar_window': 33}):
+            changed = replace(rolling, extremes=replace(rolling.extremes, **settings))
+            self.assertNotEqual(reference['evaluation_fingerprint'], preflight(changed, self.catalog)['evaluation_fingerprint'])
+
+    def test_drought_identity_includes_pre_test_smoothing_context(self):
+        config = self.drought_config(drought_definition='q347')
+        before = preflight(config, self.catalog)
+        self.rows[24]['value'] = '999'; self.write_rows()  # Validation day before the test begins.
+        after = preflight(config, self.catalog)
+        self.assertEqual(before['thresholds_mm_day'], after['thresholds_mm_day'])
+        self.assertEqual(before['training_fingerprint'], after['training_fingerprint'])
+        self.assertNotEqual(before['evaluation_fingerprint'], after['evaluation_fingerprint'])
+        pinned = replace(config, benchmark=replace(config.benchmark, expected_evaluation_fingerprint=before['evaluation_fingerprint']))
+        with self.assertRaisesRegex(ValueError, 'fingerprint'):
+            preflight(pinned, self.catalog)
+
+    def test_drought_preflight_rejects_uncovered_training_calendar(self):
+        with self.assertRaisesRegex(ValueError, 'no evaluable seven-day test windows'):
+            preflight(self.drought_config(drought_calendar_window=1), self.catalog)
+
+    def test_camels_rainfall_runoff_training_still_uses_existing_path(self):
+        from complexity_ensemble.regional import run_regional_experiment
+        config = replace(self.config, benchmark=BenchmarkConfig(),
+            model=replace(self.config.model, complex_expert='mlp', mlp_widths=(4,)),
+            strategy=replace(self.config.strategy, approach='no_routing', epochs=1),
+            hyperparameters=replace(self.config.hyperparameters, batch_size=64))
+        with patch('complexity_ensemble.bafu.load_observations', side_effect=AssertionError('CAMELS must not read BAFU')):
+            result = run_regional_experiment(config, catalog=self.catalog)
+        self.assertTrue(result.predictions)
+        self.assertFalse(result.failures)
+        self.assertGreater(result.parameter_count, 0)
+        self.assertIn('precipitation', result.resolved_config['feature_names'])
+        self.assertNotIn('benchmark_manifest', result.resolved_config)
+        self.assertFalse(result.drought_details)
+        self.assertTrue(all(row['event_type'] == 'statistical_high_flow' for row in result.extreme_events))
+
+    def test_drought_preflight_matches_execution_coverage_and_exports(self):
+        from complexity_ensemble.regional import run_regional_experiment
+        for mode in ('bafu_only', 'bafu_combined'):
+            for smoothing in ('trailing', 'centered'):
+                with self.subTest(mode=mode, smoothing=smoothing):
+                    config = self.drought_config(drought_definition='q347', drought_smoothing=smoothing)
+                    config = replace(config, benchmark=replace(config.benchmark, mode=mode),
+                        strategy=replace(config.strategy, approach='persistence'),
+                        forecast=replace(config.forecast, mode='rolling', horizon_days=7))
+                    audit = preflight(config, self.catalog)
+                    with patch('complexity_ensemble.regional._train', side_effect=AssertionError('No training')):
+                        result = run_regional_experiment(config, catalog=self.catalog)
+                    self.assertFalse(result.failures)
+                    self.assertEqual(result.resolved_config['benchmark_manifest']['evaluation_fingerprint'], audit['evaluation_fingerprint'])
+                    days = [r for r in result.drought_details['days'] if r['seed'] == config.hyperparameters.seeds[0]]
+                    self.assertEqual(sum(r['eligible'] for r in days), audit['drought_coverage']['2011']['eligible_days'])
+                    self.assertTrue(all(r['event_type'] == 'hydrological_drought' for r in result.extreme_events))
+                    if mode == 'bafu_only':
+                        self.assertEqual(result.resolved_config['drought_verification']['weather'], 'no_weather_inputs')
+                        self.assertIn('without weather', audit['forecast_interpretation'])
+                    paths = write_result_artifacts(result, self.root/f'{mode}-{smoothing}')
+                    for name in ('drought_metrics', 'drought_days', 'drought_events', 'benchmark_manifest'):
+                        self.assertTrue(Path(paths[name]).is_file())
+                    self.assertNotIn('flood_metrics', paths)
+
+    def test_drought_api_preflight_submission_results_and_downloads(self):
+        from complexity_ensemble.regional import run_regional_experiment
+        from complexity_ensemble.result_registry import save_run
+        settings = ServerSettings(self.root/'state', {'ch': DatasetRegistration(self.catalog.root, bafu_root=self.bafu)})
+        application = Application(settings); application.catalog = lambda _: self.catalog
+        config = replace(self.drought_config(drought_definition='q347'), strategy=replace(self.config.strategy, approach='persistence'))
+        body = {'dataset_id': 'ch', 'config': public_config(config)}
+        result = run_regional_experiment(config, catalog=self.catalog)
+        saved = save_run(result, settings.runs_dir)
+        with TestClient(create_app(settings, application=application)) as client:
+            for endpoint, status in [('preflight', 200), ('validate', 200), ('', 202)]:
+                response = client.post('/api/v1/experiments' + ('/' + endpoint if endpoint else ''), json=body)
+                self.assertEqual(response.status_code, status, response.text)
+            response = client.get('/api/v1/runs/' + saved.run_id)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertTrue(response.json()['drought_details']['days'])
+            self.assertTrue(response.json()['drought_summary'])
+            for name in ('drought_metrics', 'drought_days', 'drought_events', 'benchmark_manifest'):
+                response = client.get('/api/v1/runs/' + saved.run_id + '/artifacts/' + name)
+                self.assertEqual(response.status_code, 200, response.text)
 
     def test_baselines_use_available_history_and_train_only(self):
         _,data,series,_=prepare_regional_data(self.config,catalog=self.catalog)

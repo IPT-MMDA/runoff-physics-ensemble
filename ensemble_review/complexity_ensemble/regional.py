@@ -766,6 +766,7 @@ class ExperimentResult:
     artifact_paths: dict[str, str] = field(default_factory=dict)
     forecast_metrics: dict[str, dict[str, float | int]] = field(default_factory=dict)
     drought_details: dict[str, list[dict[str, object]]] = field(default_factory=dict)
+    hanze_details: dict[str, object] = field(default_factory=dict)
 
 
 ProgressCallback = Callable[[float, str], None]
@@ -1212,6 +1213,8 @@ def _resolved(config: RegionalExperimentConfig, data: RegionalHydrologyData) -> 
             "weather": "perfect_weather_hindcast" if config.forecast.mode == "rolling" else "historical_inputs",
             "provided_event_labels": False,
         }
+        if config.benchmark.mode == "bafu_only":
+            value["drought_verification"]["weather"] = "no_weather_inputs"
     value["effective_training_basins"] = list(data.training_basins)
     value["basins"]["target_basins"] = list(data.target_basins)
     value["skipped_basins"] = dict(data.skipped_basins)
@@ -1252,6 +1255,12 @@ def prepare_regional_data(config, *, catalog=None, series_by_basin=None, audit_o
     context_length = hp.routing_context_length if routed and hp.complexity_method in SCORE_ROUTING_METHODS else hp.sequence_length
     full_start = config.dates.train.resolved().start - timedelta(days=context_length)  # type: ignore[operator]
     full_end = config.dates.test.resolved().end
+    if config.benchmark.mode != "none" and config.extremes.mode == "drought":
+        # Drought verification needs seven historical days even for short
+        # model inputs, and centred observed windows need three following days.
+        full_start = config.dates.train.resolved().start - timedelta(days=max(context_length, 7))
+        if config.extremes.drought_smoothing == "centered":
+            full_end += timedelta(days=3)
     provenance = {}
     series = dict(series_by_basin or {})
     if config.benchmark.mode != "none":
@@ -1795,6 +1804,8 @@ def write_result_artifacts(result: ExperimentResult, directory: str | Path | Non
         benchmark_path = root / "benchmark_manifest.json"
         benchmark_path.write_text(json.dumps(result.resolved_config["benchmark_manifest"], indent=2, allow_nan=False), encoding="utf-8")
         drought_files["benchmark_manifest"] = str(benchmark_path)
+    if ("benchmark_manifest" in result.resolved_config
+            and result.resolved_config.get("extremes", {}).get("mode") == "statistical"):
         flood_path = root / "flood_metrics.csv"
         from .serialization import json_safe
         columns = list(dict.fromkeys(["basin_id", "seed", "event_type", *(key for row in result.extreme_events for key in row)]))
@@ -1814,6 +1825,11 @@ def write_result_artifacts(result: ExperimentResult, directory: str | Path | Non
                 writer.writeheader()
                 writer.writerows(rows)
             drought_files[name] = str(path)
+    if result.hanze_details:
+        from .serialization import json_safe
+        hanze_path = root / "hanze_evaluation.json"
+        hanze_path.write_text(json.dumps(json_safe(result.hanze_details), indent=2, allow_nan=False), encoding="utf-8")
+        drought_files["hanze"] = str(hanze_path)
     archive = root/"regional_experiment.zip"
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
         for path in (predictions_path, metrics_path, config_path, *(Path(value) for value in drought_files.values())):

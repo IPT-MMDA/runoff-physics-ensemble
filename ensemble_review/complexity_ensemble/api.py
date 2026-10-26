@@ -152,6 +152,7 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
                             "camels_chem_configured": registration.camels_chem_root is not None,
                             "hyd_responses_configured": registration.hyd_responses_root is not None,
                             "bafu_configured": registration.bafu_root is not None,
+                            "hanze_configured": registration.hanze_root is not None,
                             "bafu_statistics_configured": registration.bafu_statistics_zip is not None,
                             "bafu_return_levels_configured": registration.bafu_return_levels is not None}
                            for key, registration in settings.datasets.items()]}
@@ -353,6 +354,10 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
             count += 1
         return {"items": items, "offset": offset, "limit": limit, "total": count}
 
+    @router.get("/runs/{run_id}/hanze")
+    def hanze_evaluation(run_id: str):
+        return json_safe(application.hanze_for_run(run_id))
+
     @router.get("/runs/{run_id}/metrics")
     def metrics(run_id: str):
         run = application.runs.get(run_id)
@@ -370,6 +375,9 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
 
     @router.get("/runs/{run_id}/artifacts/{name}")
     def artifact(run_id: str, name: str):
+        if name == "hanze":
+            return JSONResponse(json_safe(application.hanze_for_run(run_id)),
+                                headers={"Content-Disposition": 'attachment; filename="hanze_evaluation.json"'})
         if name == "config":
             return JSONResponse(public_config(application.runs.get(run_id).config),
                                 headers={"Content-Disposition": 'attachment; filename="config.json"'})
@@ -386,6 +394,13 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
                     for key in keys:
                         file = application.runs.artifact(run_id, key)
                         bundle.write(file, file.name)
+                    try:
+                        hanze_report = application.hanze_for_run(run_id)
+                    except (OSError, ValueError):
+                        log.exception("Optional HANZE evaluation unavailable for archive")
+                        hanze_report = {"status": "error"}
+                    if hanze_report.get("status") == "available":
+                        bundle.writestr("hanze_evaluation.json", json.dumps(json_safe(hanze_report), allow_nan=False))
                     bundle.writestr("config.json", json.dumps(public_config(application.runs.get(run_id).config), allow_nan=False))
             except BaseException:
                 path.unlink(missing_ok=True)

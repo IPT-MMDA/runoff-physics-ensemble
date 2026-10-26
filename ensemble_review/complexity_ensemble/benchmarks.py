@@ -26,7 +26,7 @@ class BenchmarkConfig:
 def profiles():
     return [
         {'id': 'bafu_forecast_v1', 'runnable': True,
-         'description': 'One-day forecast or perfect-weather rolling hindcast; BAFU target, training-fitted thresholds or explicit official return levels.',
+         'description': 'BAFU discharge forecasts with drought or high-flow verification. Drought thresholds use training observations; verified flood return levels apply only to high flow. Combined rolling runs are perfect-weather hindcasts.',
          'published_reproduction': False},
         {'id': 'swiss_probabilistic_lstm_2026', 'runnable': False,
          'title': 'The need for uncertainty: why probabilistic LSTMs are key to improving flood predictions and enabling learned warning rules',
@@ -59,11 +59,16 @@ def validate_benchmark(config):
         raise ValueError('Use UTC/Europe/Zurich and validated/definitive BAFU release states (2, 3)')
     if config.bafu_root is None:
         raise ValueError('BAFU observations are not configured for this dataset')
-    if config.extremes.mode != 'statistical':
-        raise ValueError('BAFU benchmark requires statistical high-flow evaluation')
+    drought = config.extremes.mode == 'drought'
+    if config.extremes.mode not in {'statistical', 'drought'}:
+        raise ValueError('BAFU benchmark requires statistical high-flow or drought evaluation')
+    if drought and cfg.target != 'daily_mean':
+        raise ValueError('BAFU drought evaluation requires daily_mean discharge')
+    if drought and cfg.threshold_source != 'training_quantile':
+        raise ValueError('BAFU drought thresholds are fitted to training observations; flood return levels are not drought thresholds')
     if cfg.threshold_source not in {'training_quantile', 'official_return_level'}:
         raise ValueError('Unknown benchmark threshold source')
-    if cfg.threshold_source == 'training_quantile' and config.extremes.definition == 'absolute':
+    if not drought and cfg.threshold_source == 'training_quantile' and config.extremes.definition == 'absolute':
         raise ValueError('Training-quantile benchmark requires automatic_q95 or quantile thresholds')
     if cfg.threshold_source == 'official_return_level':
         if config.bafu_return_levels is None or cfg.return_period_years not in {2, 10, 30, 100, 300}:
@@ -98,6 +103,18 @@ def prepare_bafu(config, catalog, relevant, start, end):
 
 def threshold_values(config, series, targets, areas):
     from .regional import _thresholds
+    if config.extremes.mode == 'drought':
+        from .hydrology_drought import fit_thresholds
+        period = config.dates.train.resolved()
+        cfg = config.extremes
+        thresholds = {}
+        for basin in targets:
+            flow = dict(zip(series[basin].dates, map(float, series[basin].discharge)))
+            thresholds[basin] = asdict(fit_thresholds(flow, period.start, period.end,
+                definition=cfg.drought_definition, smoothing=cfg.drought_smoothing,
+                probability=cfg.drought_quantile, calendar_window=cfg.drought_calendar_window))
+        return thresholds, {'source': 'training_observations_only', 'averaging_days': 7,
+                            **drought_settings(config)}
     if config.benchmark.threshold_source == 'training_quantile':
         return _thresholds(config.extremes, targets, series, config.dates.train), {'source': 'training_quantile'}
     from .bafu import load_return_levels, file_digest
@@ -113,6 +130,51 @@ def threshold_values(config, series, targets, areas):
     return values, {'source': 'official_return_level', 'sha256': file_digest(config.bafu_return_levels),
                     'return_period_years': config.benchmark.return_period_years, 'records': sources,
                     'interpretation': 'Retrospective official peak-flow thresholds applied to selected daily statistic; not an operational historical threshold reconstruction.'}
+
+
+def drought_settings(config):
+    cfg = config.extremes
+    return {'definition': cfg.drought_definition, 'smoothing': cfg.drought_smoothing,
+            'probability': cfg.drought_quantile, 'calendar_window': cfg.drought_calendar_window,
+            'minimum_days': cfg.drought_minimum_days}
+
+
+def drought_coverage(config, data, series):
+    """Use the production verifier to audit windows without constructing a model.
+
+    Observations stand in for predictions solely to check which forecast windows
+    can be scored. These placeholder forecast scores are never reported.
+    """
+    from types import SimpleNamespace
+    from .hydrology_drought import verify_drought
+    period = config.dates.train.resolved()
+    horizon = config.forecast.horizon_days if config.forecast.mode == 'rolling' else 1
+    coverage = {}; observed_digest = hashlib.sha256()
+    for basin in data.target_basins:
+        flow = dict(zip(series[basin].dates, map(float, series[basin].discharge)))
+        days = sorted(day for day, station in zip(data.test.target_dates, data.test.basin_ids) if station == basin)
+        records = []; previous = None; lead = 0
+        for day in days:
+            if previous is None or day != previous + timedelta(days=1) or lead >= horizon:
+                issue = day - timedelta(days=1); lead = 0
+            lead += 1; previous = day
+            records.append(SimpleNamespace(seed=0, basin_id=basin, issue_date=issue,
+                target_date=day, lead_day=lead, predicted_mm_day=flow[day]))
+        _, details = verify_drought(records, {basin: series[basin]}, period.start, period.end,
+                                    **drought_settings(config))
+        eligible = sum(row['eligible'] for row in details['days'])
+        if not eligible:
+            raise ValueError(f'BAFU drought station {basin}: no evaluable seven-day test windows. '
+                             'Check training calendar coverage, observation gaps, smoothing and forecast horizon.')
+        coverage[basin] = {'eligible_days': eligible, 'excluded_days': len(days) - eligible}
+        # Include smoothing context and observed event boundaries in the task
+        # identity, including observations before the first test target date.
+        for row in details['days']:
+            observed_digest.update(digest({k: v for k, v in row.items() if k != 'predicted_m7_mm_day'}).encode())
+        for row in details['events']:
+            if row['kind'] == 'observed':
+                observed_digest.update(digest({k: v for k, v in row.items() if k != 'matched_event_index'}).encode())
+    return coverage, observed_digest.hexdigest()
 
 
 def training_digest(config, data, series, provenance):
@@ -151,10 +213,16 @@ def manifest(config, data, series, provenance):
         'forecast': asdict(config.forecast), 'thresholds': thresholds, 'threshold_source': threshold_source,
         'verifier': 'high_flow_one_to_one_v1',
         'observations': [(b, d, observed[b][d]) for b, d in zip(data.test.basin_ids, data.test.target_dates)]}
+    coverage = {}
+    if config.extremes.mode == 'drought':
+        from .hydrology_drought import VERIFICATION
+        coverage, observation_digest = drought_coverage(config, data, series)
+        evaluation.update(verifier=VERIFICATION, drought=drought_settings(config),
+                          drought_observation_digest=observation_digest)
     test_fingerprint = digest(evaluation)
     if config.benchmark.expected_evaluation_fingerprint and test_fingerprint != config.benchmark.expected_evaluation_fingerprint:
         raise ValueError("Evaluation fingerprint differs from the pinned benchmark cohort/task")
-    return {'version': config.benchmark.version, 'mode': config.benchmark.mode,
+    report = {'version': config.benchmark.version, 'mode': config.benchmark.mode,
         'published_reproduction': False, 'evaluation_fingerprint': test_fingerprint,
         'training_fingerprint': training_digest(config, data, series, provenance),
         'requested_targets': list(config.basins.target_basins), 'effective_targets': list(data.target_basins),
@@ -163,8 +231,13 @@ def manifest(config, data, series, provenance):
         'thresholds_mm_day': thresholds, 'threshold_provenance': threshold_source,
         'features': list(data.feature_names), 'static_features': list(data.static_feature_names),
         'physics_available': config.benchmark.mode != 'bafu_only' and config.benchmark.target == 'daily_mean',
-        'forecast_interpretation': 'one-day forecast using preceding observations' if config.forecast.mode == 'one_day' else 'perfect-weather hindcast; historical future meteorology',
+        'forecast_interpretation': ('one-day forecast using preceding observations' if config.forecast.mode == 'one_day'
+                                    else 'autoregressive discharge forecast without weather inputs' if config.benchmark.mode == 'bafu_only'
+                                    else 'perfect-weather hindcast; historical future meteorology'),
         'provenance': {k: v for k, v in provenance.items() if k != 'training_static_attributes'}, 'evaluation': {k: v for k, v in evaluation.items() if k != 'observations'}}
+    if config.extremes.mode == 'drought':
+        report['drought_coverage'] = coverage
+    return report
 
 
 def preflight(config, catalog):

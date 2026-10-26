@@ -49,6 +49,15 @@ def run_job(application, store, job, owner):
         result = execute_experiment(config, progress, token)
         result.resolved_config["dataset_id"] = payload["dataset_id"]
         result.resolved_config["requested_config"] = public_config(config)
+        if application.registration(payload["dataset_id"]).hanze_root is not None:
+            progress(0.99, "Evaluating documented HANZE flood events")
+            # Catalogue failures must not discard successfully trained discharge results.
+            try:
+                result.hanze_details = application.evaluate_hanze(payload["dataset_id"], result.predictions, result.resolved_config)
+            except Exception:
+                log.exception("HANZE evaluation failed")
+                result.hanze_details = {"status": "error", "message": "HANZE evaluation failed; inspect worker logs and dataset files."}
+                result.failures.append("HANZE evaluation unavailable; discharge and threshold-based scores were preserved.")
         # Persist partial output for inspection; cancelled runs are never promoted.
         if token.cancelled:
             result.cancelled = True

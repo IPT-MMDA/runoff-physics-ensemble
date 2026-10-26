@@ -361,6 +361,11 @@ def _config_from_ui_values(
             minimum_days=int(values[60]) if len(values) > 60 else 3,
             pulse_gap_days=int(values[61]) if len(values) > 61 else 7,
             minimum_basins=int(values[62]) if len(values) > 62 else 2,
+            drought_definition=values[78] if len(values) > 78 else "seasonal_quantile",
+            drought_smoothing=values[79] if len(values) > 79 else "trailing",
+            drought_quantile=float(values[80]) if len(values) > 80 else 0.15,
+            drought_calendar_window=int(values[81]) if len(values) > 81 else 31,
+            drought_minimum_days=int(values[82]) if len(values) > 82 else 1,
         ),
         estreams_root=resolved_estreams_root,
         estreams_features=selected_estreams_features,
@@ -687,6 +692,7 @@ def build_app(
                 ("Daily discharge forecasting", "none"),
                 ("Daily discharge + statistical extreme-event evaluation", "statistical"),
                 ("Daily discharge + hydrological event evaluation", "event_based"),
+                ("Hydrological drought (HYD-RESPONSES-style definitions)", "drought"),
             ],value="none",label="Analysis task")
             definition=gr.Radio([("Automatic per-basin Q95","automatic_q95"),("Manual absolute discharge","absolute"),("Manual quantile","quantile")],value="automatic_q95",label="Definition")
             extreme_value=gr.Number(value=.95,label="Global value")
@@ -718,6 +724,45 @@ def build_app(
                     minimum_basins=gr.Number(2, precision=0, label="Minimum concurrent basins")
                 gr.Markdown("Thresholds are estimated from each basin's training-period observations. "
                             "Rapid rise uses day-to-day discharge change; regional events need enough selected basins.")
+            with gr.Accordion("Drought definition and verification", open=True, visible=False) as drought_panel:
+                drought_definition = gr.Radio([
+                    ("Seasonal low-flow percentile", "seasonal_quantile"),
+                    ("Fixed Q347 estimate", "q347"),
+                ], value="seasonal_quantile", label="Drought threshold")
+                drought_smoothing = gr.Radio([
+                    ("Trailing seven-day mean (causal adaptation)", "trailing"),
+                    ("Centred seven-day mean (HYD-RESPONSES smoothing)", "centered"),
+                ], value="trailing", label="Discharge smoothing")
+                with gr.Row():
+                    drought_quantile = gr.Number(.15, label="Seasonal training quantile (0–1)")
+                    drought_calendar_window = gr.Number(31, precision=0, label="Seasonal calendar window (odd number of days)")
+                    drought_minimum_days = gr.Number(1, precision=0, label="Minimum drought spell days")
+                gr.Markdown(
+                    "Drought thresholds are fitted from each selected basin's training observations. "
+                    "The seasonal threshold uses smoothed discharge near each calendar day; Q347 is estimated "
+                    "from the raw daily training flow-duration curve (347/365 exceedance), independently of the seasonal controls. "
+                    "Centred smoothing requires rolling forecasts of at least four days: each scored day needs "
+                    "three later predictions from the same issue, so the final three leads are excluded. "
+                    "Trailing smoothing uses the preceding six days and the target day. "
+                    "Missing days split events; unavailable windows are counted as excluded. "
+                    "Boundary events are marked censored and excluded from unsupported timing/duration comparisons."
+                )
+                gr.Markdown(
+                    "Every model uses the same drought verification: one-to-one maximum-overlap event matching, "
+                    "plus the existing any-overlap scores as supplementary columns. Day scores are reported by lead; "
+                    "events are evaluated separately for each forecast issue. One-day forecasts evaluate drought state, "
+                    "not complete drought duration. Day values, thresholds and event matches are included in the run archive. "
+                    "HYD-RESPONSES water-state predictors remain optional in Data and features; enabling them does not "
+                    "select this task. This task uses the experiment's observed discharge and training-fitted definitions, "
+                    "rather than the supplied retrospective event labels or 1991–2020 climatology."
+                )
+            drought_definition.change(
+                lambda value: (gr.Number(interactive=value == "seasonal_quantile"),
+                               gr.Number(interactive=value == "seasonal_quantile")),
+                inputs=drought_definition, outputs=[drought_quantile, drought_calendar_window],
+            )
+            extreme_mode.change(lambda mode: gr.Accordion(visible=mode == "drought"),
+                                inputs=extreme_mode, outputs=drought_panel)
             forecast_mode=gr.Radio([
                 ("One-day forecast (observed discharge history)", "one_day"),
                 ("Rolling multi-day hindcast", "rolling"),
@@ -1051,6 +1096,10 @@ the leaderboard lets you revisit and compare saved runs.
                 value_b = run_b.aggregate_metrics.get(key)
                 delta = comparison_data["aggregate_delta_b_minus_a"].get(key)
                 table.append([label, value_a, value_b, delta])
+            for key, delta in sorted(comparison_data["drought_delta_b_minus_a"].items()):
+                table.append([f"Drought macro mean: {key}",
+                              comparison_data["run_a"]["drought_summary"].get(key),
+                              comparison_data["run_b"]["drought_summary"].get(key), delta])
             table.extend([
                 ["Parameters", run_a.parameter_count, run_b.parameter_count,
                  run_b.parameter_count - run_a.parameter_count],
@@ -1353,6 +1402,9 @@ the leaderboard lets you revisit and compare saved runs.
                 scenario_result = compare_paved_site(result, basin, *scenario_values)
                 message += " Paved-site comparison is ready in the Impact scenario tab."
             metric_value={"aggregate":result.aggregate_metrics,"per_basin":result.per_basin_metrics,"by_lead_day":result.forecast_metrics,"routing":result.routing_diagnostics,"parameters":result.parameter_count,"runtime_seconds":result.runtime_seconds,"failures":result.failures}
+            if config.extremes.mode == "drought":
+                from .hydrology_drought import drought_summary
+                metric_value["drought_lead_macro_means"] = drought_summary(result.extreme_events)
             file_values = (
                 [str(paths[key]) for key in ("predictions", "metrics", "config", "archive")]
                 if paths is not None else [None, None, None, None]
@@ -1382,7 +1434,7 @@ the leaderboard lets you revisit and compare saved runs.
         def refresh_result_views(basin, result):
             return refresh_result(basin, result)[1:]
 
-        inputs=[targets,scope,train_start,train_end,val_start,val_end,test_start,test_end,approach,complex_expert,simple_expert,epochs,sequence,seeds,batch,learning_rate,noise,percentile,temperature,physics_weight,interface_weight,teacher_epochs,distill_epochs,consolidation_epochs,mlp_widths,mamba_hidden,mamba_layers,mamba_ff,rbf_centers,fourier_frequencies,extreme_mode,routing_weight,compute_weight,device,definition,extreme_value,ood_quantile,ood_shrinkage,physics_optimization,physics_teacher,kan_candidates,kan_steps,kan_grid,kan_order,kan_additive,kan_multiplicative,kan_sparsity,kan_noise_levels,kan_accuracy_tolerance,kan_symbolic,use_estreams,estreams_path,estreams_features,use_camels_chem,camels_chem_path,camels_chem_features,forecast_mode,horizon_days,event_types,high_quantile,low_quantile,rise_quantile,minimum_days,pulse_gap_days,minimum_basins,fall_quantile,complexity_method,routing_context,embedding_dim,embedding_delay,ph_min_persistence,ph_score,lyapunov_theiler,lyapunov_horizon,lyapunov_r2,camels_state_features,use_hyd_responses,hyd_responses_path,hyd_responses_features,hyd_responses_static]
+        inputs=[targets,scope,train_start,train_end,val_start,val_end,test_start,test_end,approach,complex_expert,simple_expert,epochs,sequence,seeds,batch,learning_rate,noise,percentile,temperature,physics_weight,interface_weight,teacher_epochs,distill_epochs,consolidation_epochs,mlp_widths,mamba_hidden,mamba_layers,mamba_ff,rbf_centers,fourier_frequencies,extreme_mode,routing_weight,compute_weight,device,definition,extreme_value,ood_quantile,ood_shrinkage,physics_optimization,physics_teacher,kan_candidates,kan_steps,kan_grid,kan_order,kan_additive,kan_multiplicative,kan_sparsity,kan_noise_levels,kan_accuracy_tolerance,kan_symbolic,use_estreams,estreams_path,estreams_features,use_camels_chem,camels_chem_path,camels_chem_features,forecast_mode,horizon_days,event_types,high_quantile,low_quantile,rise_quantile,minimum_days,pulse_gap_days,minimum_basins,fall_quantile,complexity_method,routing_context,embedding_dim,embedding_delay,ph_min_persistence,ph_score,lyapunov_theiler,lyapunov_horizon,lyapunov_r2,camels_state_features,use_hyd_responses,hyd_responses_path,hyd_responses_features,hyd_responses_static,drought_definition,drought_smoothing,drought_quantile,drought_calendar_window,drought_minimum_days]
         prepare = run.click(lambda: CancellationToken(), outputs=token_state, queue=False)
         scenario_prepare = run_scenario_experiment.click(
             lambda: (CancellationToken(), True),

@@ -1,0 +1,65 @@
+{
+  "dataset_id": "camels-ch",
+  "config": {
+    "basins": {
+      "target_basins": [
+        "2011"
+      ],
+      "training_scope": "targets_only",
+      "eligible_basins": [
+        "2011"
+      ]
+    },
+    "dates": {
+      "train": {
+        "start": "1991-01-01",
+        "end": "2005-12-31"
+      },
+      "validation": {
+        "start": "2006-01-01",
+        "end": "2010-12-31"
+      },
+      "test": {
+        "start": "2011-01-01",
+        "end": "2020-12-31"
+      }
+    },
+    "benchmark": {
+      "mode": "bafu_only",
+      "target": "daily_mean",
+      "strict_cohort": true,
+      "threshold_source": "training_quantile"
+    },
+    "extremes": {
+      "mode": "drought",
+      "drought_definition": "seasonal_quantile",
+      "drought_smoothing": "trailing",
+      "drought_quantile": 0.15,
+      "drought_calendar_window": 31,
+      "drought_minimum_days": 3
+    },
+    "hyperparameters": {
+      "physics_weight": 0,
+      "sequence_length": 30,
+      "seeds": [
+        0,
+        1,
+        2
+      ]
+    },
+    "model": {
+      "complex_expert": "pinnmamba"
+    },
+    "strategy": {
+      "approach": "soft_routing"
+    },
+    "forecast": {
+      "mode": "rolling",
+      "horizon_days": 30
+    }
+  },
+  "use_estreams": false,
+  "use_camels_chem": false,
+  "use_hyd_responses": false,
+  "save_to_leaderboard": false
+}

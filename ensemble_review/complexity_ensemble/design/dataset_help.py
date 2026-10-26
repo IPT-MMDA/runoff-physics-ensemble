@@ -10,7 +10,9 @@ _DATASET_HELP = {
         "Swiss snow products have partial coverage in some border catchments.",
         "The target remains daily discharge. Optional physical descriptors add "
         "terrain, soil and hydrogeological context. Anomalies, drought indices, "
-        "centred flow averages and discharge-derived descriptors are excluded.",
+        "centred flow averages and discharge-derived descriptors are excluded as predictors. "
+        "Select Hydrological drought in Task to evaluate forecasts with training-fitted "
+        "drought definitions; that selection is independent of these optional predictors.",
     ),
     "camels": (
         "CAMELS-CH daily hydrology",

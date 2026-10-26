@@ -31,6 +31,9 @@ class Application:
                 raise ValueError(f"optional {kind} dataset is not configured")
         config = config_from_mapping(
             cfg, data_root=registration.data_root,
+            bafu_root=registration.bafu_root,
+            bafu_statistics_zip=registration.bafu_statistics_zip,
+            bafu_return_levels=registration.bafu_return_levels,
             estreams_root=registration.estreams_root if payload.get("use_estreams") else None,
             camels_chem_root=registration.camels_chem_root if payload.get("use_camels_chem") else None,
             hyd_responses_root=registration.hyd_responses_root if payload.get("use_hyd_responses") else None,
@@ -42,6 +45,20 @@ class Application:
         if check_data:
             catalog = self.catalog(payload["dataset_id"])
             eligible = set(catalog.eligible_ids)
+            if config.benchmark.mode != "none":
+                from dataclasses import replace
+                from .bafu import basin_compatibility
+                compatibility = basin_compatibility(catalog, registration.bafu_root)
+                eligible = {basin for basin, modes in compatibility.items()
+                            if modes[config.benchmark.mode]['eligible']}
+                invalid = set(config.basins.target_basins) - eligible
+                if invalid:
+                    raise ValueError('Incompatible BAFU target stations: ' + '; '.join(
+                        basin + ': ' + ', '.join(compatibility.get(basin, {}).get(
+                            config.benchmark.mode, {}).get('reasons', ['Unknown station']))
+                        for basin in sorted(invalid)))
+                if config.basins.eligible_basins is None:
+                    config = replace(config, basins=replace(config.basins, eligible_basins=tuple(sorted(eligible))))
             if set(config.basins.target_basins) - eligible:
                 raise ValueError("target basins must be eligible basins in this dataset")
             if config.basins.eligible_basins is not None and set(config.basins.eligible_basins) - eligible:
@@ -66,3 +83,21 @@ class Application:
 
     def catalog_for_run(self, run_id):
         return self.catalog(self.dataset_for_run(run_id))
+
+    def evaluate_hanze(self, dataset_id, predictions, config):
+        root = self.registration(dataset_id).hanze_root
+        if root is None:
+            return {"status": "not_configured", "message": "HANZE is not configured for this dataset."}
+        if config.get("benchmark", {}).get("mode", "none") == "none" or config.get("extremes", {}).get("mode") != "statistical":
+            return {"status": "not_applicable", "message": "HANZE evaluation applies to BAFU high-flow runs."}
+        from .hanze import evaluate_run
+        return evaluate_run(root, predictions, config, self.catalog(dataset_id))
+
+    def hanze_for_run(self, run_id):
+        run = self.runs.get(run_id)
+        from .hanze import VERSION
+        if run.hanze_details and (run.hanze_details.get("status") != "available" or run.hanze_details.get("verification") == VERSION):
+            return run.hanze_details
+        if run.config.get("benchmark", {}).get("mode", "none") == "none" or run.config.get("extremes", {}).get("mode") != "statistical":
+            return {"status": "not_applicable", "message": "HANZE evaluation applies to BAFU high-flow runs."}
+        return self.evaluate_hanze(self.dataset_for_run(run_id), self.runs.predictions(run_id), run.config)

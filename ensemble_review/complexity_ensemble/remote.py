@@ -99,7 +99,8 @@ class RemoteExecutor:
         return ExperimentResult(rows, run["aggregate_metrics"], run["per_basin_metrics"],
                                 run["routing_diagnostics"], run["loss_traces"], run["extreme_events"],
                                 run["failures"], resolved, run["parameter_count"], run["runtime_seconds"],
-                                run["cancelled"], forecast_metrics=run["forecast_metrics"])
+                                run["cancelled"], forecast_metrics=run["forecast_metrics"],
+                                drought_details=run.get("drought_details", {}))
 
     def episodes(self, result, basin, event_days, limit):
         run_id = result.resolved_config["api_run_id"]

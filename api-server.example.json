@@ -3,7 +3,10 @@
   "results_dir": "artifacts/hydrology/run_registry",
   "datasets": {
     "camels-ch": {
-      "data_root": "/absolute/path/to/camels_ch"
+      "data_root": "/absolute/path/to/camels_ch",
+      "bafu_root": "/absolute/path/to/bafu_water",
+      "bafu_statistics_zip": "/absolute/path/to/hydrologie-hochwasserstatistik_2056.shp.zip",
+      "hanze_root": "/absolute/path/to/hanze"
     }
   },
   "cors_origins": []

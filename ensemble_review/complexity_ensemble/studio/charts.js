@@ -69,6 +69,14 @@ export function chart(container, series, { scatter = false, date = true, marker 
 export class BasinAtlas {
   constructor(canvas, onSelect) {
     this.canvas = canvas; this.onSelect = onSelect; this.rows = []; this.paths = []; this.selected = new Set();
+    canvas.addEventListener("pointermove", e => {
+      if (!this.performance) return;
+      const bounds = canvas.getBoundingClientRect(), ctx = canvas.getContext("2d");
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+      const hit = [...this.paths].reverse().find(({ path }) => ctx.isPointInPath(path, e.clientX - bounds.left, e.clientY - bounds.top, "evenodd"));
+      ctx.restore();
+      canvas.title = hit ? `${hit.row.basin_id} · ${hit.row.name || ""}: ${this.performance.get(hit.row.basin_id)?.label || "No score"}` : "";
+    });
     this.resize = new ResizeObserver(() => this.draw()); this.resize.observe(canvas);
     canvas.addEventListener("click", e => {
       const bounds = canvas.getBoundingClientRect(), ctx = canvas.getContext("2d");
@@ -79,6 +87,7 @@ export class BasinAtlas {
       if (hit?.row.eligible) this.onSelect(hit.row.basin_id);
     });
   }
+  setPerformance(styles) { this.performance = styles; this.draw(); }
   setData(rows) { this.rows = rows; this.layoutKey = null; this.draw(); }
   setSelected(selected) { this.selected = selected; this.draw(); }
   draw() {
@@ -110,8 +119,8 @@ export class BasinAtlas {
     const selectedStroke = theme.getPropertyValue("--map-stroke").trim() || "#0099ad";
     for (const { path, row } of this.paths) {
       const selected = this.selected.has(row.basin_id);
-      ctx.fillStyle = selected ? selectedFill : row.eligible ? "#d8dde3" : "#e1e7ed";
-      ctx.strokeStyle = selected ? selectedStroke : "#a8b4c2"; ctx.lineWidth = selected ? 1.2 : .65;
+      ctx.fillStyle = this.performance ? this.performance.get(row.basin_id)?.color || "#d8dde3" : selected ? selectedFill : row.eligible ? "#d8dde3" : "#e1e7ed";
+      ctx.strokeStyle = selected ? selectedStroke : "#a8b4c2"; ctx.lineWidth = selected ? (this.performance ? 3 : 1.2) : .65;
       ctx.fill(path, "evenodd"); ctx.stroke(path);
     }
   }

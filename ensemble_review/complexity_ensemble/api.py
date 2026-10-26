@@ -150,7 +150,11 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
         return {"items": [{"dataset_id": key, "available": registration.data_root.is_dir(),
                             "estreams_configured": registration.estreams_root is not None,
                             "camels_chem_configured": registration.camels_chem_root is not None,
-                            "hyd_responses_configured": registration.hyd_responses_root is not None}
+                            "hyd_responses_configured": registration.hyd_responses_root is not None,
+                            "bafu_configured": registration.bafu_root is not None,
+                            "hanze_configured": registration.hanze_root is not None,
+                            "bafu_statistics_configured": registration.bafu_statistics_zip is not None,
+                            "bafu_return_levels_configured": registration.bafu_return_levels is not None}
                            for key, registration in settings.datasets.items()]}
 
     @router.get("/ui/bootstrap")
@@ -159,10 +163,11 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
         from .regional import (ModelArchitectureConfig, TrainingStrategyConfig,
                                HyperparameterConfig, PhysicsModelConfig,
                                ExtremeEventConfig, ForecastConfig)
+        from .benchmarks import BenchmarkConfig
         config = {name: asdict(cls()) for name, cls in (
             ("model", ModelArchitectureConfig), ("strategy", TrainingStrategyConfig),
             ("hyperparameters", HyperparameterConfig), ("physics", PhysicsModelConfig),
-            ("extremes", ExtremeEventConfig), ("forecast", ForecastConfig))}
+            ("extremes", ExtremeEventConfig), ("forecast", ForecastConfig), ("benchmark", BenchmarkConfig))}
         config.update(basins={"target_basins": [], "training_scope": "exclude_targets"},
                       dates={"train": {"start": "2010-01-01", "end": "2016-08-06"},
                              "validation": {"start": "2016-08-07", "end": "2018-10-18"},
@@ -180,12 +185,21 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
             path = getattr(registration, kind + "_root")
             if path is not None:
                 optional[kind] = {"gauges": validate_optional_dataset(kind, path)}
+        if registration.bafu_root is not None:
+            from .bafu import observation_root
+            observation_root(registration.bafu_root)
+            optional["bafu"] = {"configured": True, "date_coverage_checked": False}
         return {"dataset_id": dataset_id, "valid": True,
                 "eligible_basins": len(catalog.eligible_ids), "optional": optional}
 
     @router.get("/datasets/{dataset_id}/basins")
     def basins(dataset_id: str, offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000)):
-        rows = basin_metadata(application.catalog(dataset_id))
+        from .bafu import basin_compatibility
+        catalog = application.catalog(dataset_id)
+        rows = basin_metadata(catalog)
+        compatibility = basin_compatibility(catalog, application.registration(dataset_id).bafu_root)
+        for row in rows:
+            row['compatibility'] = compatibility[row['basin_id']]
         return {"items": rows[offset:offset + limit], "total": len(rows), "offset": offset, "limit": limit}
 
     @router.get("/datasets/{dataset_id}/features")
@@ -195,15 +209,48 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
         from .camels_ch_chem import CAMELS_CH_CHEM_DYNAMIC_FEATURES
         registration = application.registration(dataset_id)
         catalog = application.catalog(dataset_id)
-        return {"dynamic": ["precipitation", "temperature", "pet", "previous_discharge", "day_sin", "day_cos"],
+        return {"bafu_dynamic": ["previous_discharge", "day_sin", "day_cos"] if registration.bafu_root else [],
+                "bafu_targets": ["daily_mean", "daily_max"] if registration.bafu_root else [],
+                "dynamic": ["precipitation", "temperature", "pet", "previous_discharge", "day_sin", "day_cos"],
                 "static_attributes": sorted({name for row in catalog.records for name in row.static_attributes}),
                 "estreams": list(ESTREAMS_DYNAMIC_FEATURES) if registration.estreams_root else [],
                 "camels_chem": list(CAMELS_CH_CHEM_DYNAMIC_FEATURES) if registration.camels_chem_root else [],
                 "hyd_responses": list(HYD_RESPONSES_FEATURES) if registration.hyd_responses_root else []}
 
+    @router.get("/benchmarks")
+    def benchmark_profiles():
+        from .benchmarks import profiles
+        return {"items": profiles()}
+
+    @router.get("/datasets/{dataset_id}/bafu/statistics")
+    def bafu_statistics(dataset_id: str):
+        from .bafu import statistics_index, load_return_levels
+        registration = application.registration(dataset_id)
+        result = statistics_index(registration.bafu_statistics_zip) if registration.bafu_statistics_zip else {
+            "records": [], "contains_return_levels": False, "note": "No statistics ZIP registered"}
+        result["verified_return_levels"] = list(load_return_levels(registration.bafu_return_levels).values()) if registration.bafu_return_levels else []
+        return result
+
+    @router.post("/experiments/preflight")
+    def benchmark_preflight(body: ExperimentRequest):
+        from .benchmarks import preflight
+        config = application.experiment_config(body.model_dump(mode="json"))
+        if config.benchmark.mode == "none":
+            raise ValueError("Select bafu_only or bafu_combined for benchmark preflight")
+        report = preflight(config, application.catalog(body.dataset_id))
+        return {"valid": report["cohort_complete"] or not config.benchmark.strict_cohort, "training_started": False, "manifest": json_safe(report)}
+
+    @router.get("/runs/{run_id}/benchmark")
+    def run_benchmark(run_id: str):
+        return json_safe(application.runs.get(run_id).config.get("benchmark_manifest", {}))
+
     @router.post("/experiments/validate")
     def validate_experiment(body: ExperimentRequest):
         config = application.experiment_config(body.model_dump(mode="json"))
+        if config.benchmark.mode != "none":
+            checked_benchmark(body, config)
+            return {"valid": True, "config": public_config(config), "dataset_id": body.dataset_id,
+                    "data_check": "BAFU station compatibility and selected date windows checked without training"}
         return {"valid": True, "config": public_config(config),
                 "dataset_id": body.dataset_id,
                 "data_check": "Dataset layout, basin eligibility and configuration checked; date coverage is checked during execution"}
@@ -211,8 +258,20 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
     @router.post("/experiments", status_code=202, response_model=JobResponse)
     def experiments(body: ExperimentRequest, idempotency_key: str | None = Header(None)):
         payload = body.model_dump(mode="json")
-        application.experiment_config(payload)
+        config = application.experiment_config(payload)
+        if config.benchmark.mode != "none":
+            checked_benchmark(body, config)
         return submit("experiment", payload, idempotency_key)
+
+    def checked_benchmark(body, config):
+        from .benchmarks import preflight
+        report = preflight(config, application.catalog(body.dataset_id))
+        if config.benchmark.strict_cohort and not report['cohort_complete']:
+            excluded = set(report['excluded_basins']) | set(report['provenance'].get('missing_stations', []))
+            raise ValueError(f"BAFU date coverage is incomplete for {len(excluded)} stations. "
+                             "Open BAFU benchmark → Check benchmark coverage, review the exclusions, "
+                             "then choose Use stations with complete coverage or adjust the date splits.")
+        return report
 
     @router.get("/jobs/{job_id}", response_model=JobResponse)
     def job(job_id: str):
@@ -295,6 +354,10 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
             count += 1
         return {"items": items, "offset": offset, "limit": limit, "total": count}
 
+    @router.get("/runs/{run_id}/hanze")
+    def hanze_evaluation(run_id: str):
+        return json_safe(application.hanze_for_run(run_id))
+
     @router.get("/runs/{run_id}/metrics")
     def metrics(run_id: str):
         run = application.runs.get(run_id)
@@ -312,6 +375,9 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
 
     @router.get("/runs/{run_id}/artifacts/{name}")
     def artifact(run_id: str, name: str):
+        if name == "hanze":
+            return JSONResponse(json_safe(application.hanze_for_run(run_id)),
+                                headers={"Content-Disposition": 'attachment; filename="hanze_evaluation.json"'})
         if name == "config":
             return JSONResponse(public_config(application.runs.get(run_id).config),
                                 headers={"Content-Disposition": 'attachment; filename="config.json"'})
@@ -322,21 +388,38 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
             path = Path(handle.name)
             try:
                 with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as bundle:
-                    for key in ("predictions", "metrics"):
+                    keys = ["predictions", "metrics"]
+                    if application.runs.get(run_id).config.get("extremes", {}).get("mode") == "drought":
+                        keys.extend(("drought_metrics", "drought_days", "drought_events"))
+                    for key in keys:
                         file = application.runs.artifact(run_id, key)
                         bundle.write(file, file.name)
+                    try:
+                        hanze_report = application.hanze_for_run(run_id)
+                    except (OSError, ValueError):
+                        log.exception("Optional HANZE evaluation unavailable for archive")
+                        hanze_report = {"status": "error"}
+                    if hanze_report.get("status") == "available":
+                        bundle.writestr("hanze_evaluation.json", json.dumps(json_safe(hanze_report), allow_nan=False))
                     bundle.writestr("config.json", json.dumps(public_config(application.runs.get(run_id).config), allow_nan=False))
             except BaseException:
                 path.unlink(missing_ok=True)
                 raise
             return FileResponse(path, media_type="application/zip", filename="regional_experiment.zip",
                                 background=BackgroundTask(path.unlink, missing_ok=True))
+        if name == "benchmark_manifest":
+            return JSONResponse(json_safe(application.runs.get(run_id).config.get("benchmark_manifest", {})))
         return FileResponse(application.runs.artifact(run_id, name), media_type="text/csv",
                             filename=f"{name}.csv")
 
     @router.post("/comparisons")
     def comparison(body: ComparisonRequest):
-        return compare_runs(application.runs.get(body.run_a), application.runs.get(body.run_b))
+        result = compare_runs(application.runs.get(body.run_a), application.runs.get(body.run_b))
+        if result.get("benchmark_comparison", {}).get("compatible"):
+            from .benchmarks import paired_comparison
+            result["paired_comparison"] = json_safe(paired_comparison(
+                list(application.runs.predictions(body.run_a)), list(application.runs.predictions(body.run_b))))
+        return result
 
     @router.get("/runs/{run_id}/replay/episodes")
     def episodes(run_id: str, basin_id: str, event_days: int = Query(14, ge=1, le=90),

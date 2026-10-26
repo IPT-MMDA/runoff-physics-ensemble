@@ -25,7 +25,8 @@ potential evaporation demand, not observed actual evaporation. The replay
 requires the original CAMELS-CH data directory; saved prediction CSVs alone
 do not contain meteorological inputs.
 
-The Task tab offers three analysis choices. Daily discharge forecasting reports
+The Task tab offers daily discharge, statistical extremes, hydrological events,
+and a dedicated hydrological drought task. Daily discharge forecasting reports
 continuous discharge metrics. Statistical extremes retain the existing
 single-day high-flow threshold evaluation. Hydrological event evaluation adds
 the definitions below. It does not claim that a discharge event is a confirmed
@@ -123,3 +124,127 @@ sensitivity analysis; it does not retrain the model or alter leaderboard
 metrics. Historical daily rainfall is supplied even for rolling hindcasts,
 and adjusted discharge is not fed back into later model predictions. This
 calculation cannot resolve short storm peaks, drainage hydraulics, or flooding.
+
+## Hydrological drought task
+
+Select **Hydrological drought (HYD-RESPONSES-style definitions)** in Task.
+Users retain their selected basins, data paths, date splits, models and seeds;
+there is no fixed benchmark cohort, release or reference period. This task
+keeps daily discharge as the model target and adds drought verification.
+The optional HYD-RESPONSES water-state predictors in Data and features are
+independent of selecting the task. Discharge observations come from the
+experiment's existing discharge series (CAMELS-CH in the app), not from
+HYD-RESPONSES `Q` or its supplied event-number files.
+
+### Definitions and reference data
+
+The drought controls are saved under `extremes`:
+
+| Field | Values / default | Meaning |
+| --- | --- | --- |
+| `mode` | `drought` | Activate this task only |
+| `drought_definition` | `seasonal_quantile` (default), `q347` | Seasonal threshold or fixed training estimate |
+| `drought_smoothing` | `trailing` (default), `centered` | Seven-day discharge averaging alignment |
+| `drought_quantile` | 0.15 | Seasonal low-flow quantile |
+| `drought_calendar_window` | 31 | Odd calendar window, 1–365 days |
+| `drought_minimum_days` | 1 | Minimum duration for extracted events |
+
+Seasonal thresholds are fitted separately for each basin using **only the
+selected training period**. Seven-day means whose full window is inside that
+period are pooled around each target calendar day and the selected quantile
+is calculated using linear interpolation. The calendar window wraps at New
+Year; a common leap-year calendar aligns month/day across years. Missing
+reference coverage is reported as an excluded day. Entirely unsupported
+training/test calendar selections fail before training.
+
+The fixed Q347 option estimates the 347/365 exceedance flow from the raw
+training daily discharge distribution, using lower-tail quantile 18/365.
+This is a pooled training-period estimate, not an official FOEN statistic or
+a reconstruction of its statutory reference period. The seasonal quantile
+and calendar-window controls do not affect Q347.
+
+These definitions follow the [HYD-RESPONSES methodological framework](https://doi.org/10.5194/essd-18-4113-2026).
+The task deliberately refits references to the user's training period instead
+of importing the dataset's retrospective 1991–2020 climatology. Consequently,
+this is not an exact reproduction of its supplied event catalogue. Predictors
+continue to exclude supplied centred averages, event IDs and retrospective
+indices; enabling drought verification does not introduce them as inputs.
+
+### Trailing and centred smoothing
+
+Trailing M7 on day `t` averages `t-6` through `t`. Its predicted version combines
+observed discharge on/before the issue date with predictions after issue.
+This is a causal adaptation of the dataset's centred M7Q.
+
+Centred M7 averages `t-3` through `t+3`, matching the dataset's averaging
+alignment. It requires rolling mode with a horizon of at least four days.
+Future values must be predictions **from that same issue**. The final three
+leads of every block cannot be scored; incomplete final blocks may contribute
+no eligible days. Neither later observations nor forecasts from the next block
+are substituted to fill these windows. Observations after issue are used only
+for verification of the observed target.
+
+Rolling drought evaluation inherits the existing perfect-weather hindcast:
+future weather comes from historical data; selected water-state features
+remain held at issue-day values. This task adds neither weather forecasts nor
+an operational availability model for retrospective predictor products.
+
+### Verification and boundaries
+
+All model approaches use the same drought verifier, identified by
+`drought_one_to_one_overlap_v1`. Existing statistical and hydrological-event
+tasks retain their original scoring. Drought day classification is simply a
+strict crossing below the threshold; `drought_minimum_days` filters extracted
+events, not individual day-classification scores.
+
+Day metrics include hits, misses, false alarms, precision, recall, CSI,
+false-alarm ratio, M7 MAE and observed-low-flow M7 bias/MAE. They are reported
+per issue and by lead within each basin/seed. Requested, excluded and evaluated
+counts remain explicit. Undefined rates (for example precision with no
+predicted positives) remain undefined, not perfect or zero scores.
+
+Events are extracted separately within each issue trajectory. One-to-one,
+chronologically ordered matching maximizes total overlapping days and then
+the number of matched pairs. It prevents one long prediction from receiving
+credit for several observed droughts. The earlier any-overlap precision and
+recall are retained as supplementary `overlap_event_*` columns **only in this
+new task**, alongside the stricter `event_precision` and `event_recall`.
+
+Missing/invalid days split events. Events touching an evaluation boundary are
+marked left/right censored; a known preceding non-drought state can establish
+onset at the first scored day. Onset errors require identifiable starts;
+recovery errors require identifiable ends; duration and deficit errors require
+complete matched events. Each error reports its contributing pair count.
+Unmatched events still affect precision/recall. In a short horizon, long droughts
+can remain censored, so complete-event timing may be undefined. One-day
+forecasts primarily assess drought state, not full event duration.
+
+Deficits are sums of threshold minus M7 during qualifying spells, in
+basin-equivalent mm. These are **window deficits**, not HYD-RESPONSES cumulative
+streamflow deficit (CQD) phases extending until compensation. Events repeated
+across issue dates are issue-specific forecast segments, not independent
+physical droughts or stitched whole-event reconstructions.
+
+### Results and reruns
+
+The ordinary discharge predictions and metrics remain available. Drought
+results appear in the Extreme-event results table. The metrics JSON and
+saved-run comparisons additionally show finite lead-score means across
+available basin/seed rows and each score's contributing count. These are
+unweighted descriptive macro means, not significance tests or confidence
+intervals. Compare definitions, dates and coverage before interpreting deltas.
+Drought definition/smoothing controls are also available in comparison filters.
+
+The run archive adds:
+
+- `drought_metrics.csv`: per-issue event/day scores and per-lead day scores.
+- `drought_days.csv`: every requested day, issue, lead, smoothed values,
+  threshold, eligibility and exclusion reason.
+- `drought_events.csv`: observed/predicted event intervals, window deficits,
+  censor flags and matched counterpart indices within that issue and kind.
+
+Saved runs, the CLI, the HTTP API and both UIs preserve all drought settings
+and audit tables. HTTP artifacts are available as `drought_metrics`,
+`drought_days` and `drought_events`. Old configurations and saved manifests
+without drought fields retain their earlier defaults and behavior. No
+experiments are run merely by selecting or configuring the task.

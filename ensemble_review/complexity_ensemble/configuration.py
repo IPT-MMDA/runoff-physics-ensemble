@@ -5,6 +5,7 @@ from dataclasses import fields
 from pathlib import Path
 from typing import Mapping, TypeVar
 
+from .benchmarks import BenchmarkConfig
 from .camels_ch_chem import DEFAULT_CAMELS_CH_CHEM_FEATURES
 from .estreams import ESTREAMS_DYNAMIC_FEATURES
 from .hyd_responses import DEFAULT_HYD_RESPONSES_FEATURES
@@ -21,7 +22,7 @@ def _dataclass_values(cls: type[T], value: Mapping[str, object]) -> dict[str, ob
     allowed = {item.name for item in fields(cls)}
     result = {key: item for key, item in value.items() if key in allowed}
     for key in (
-        "mlp_widths", "seeds", "robustness_noise_levels", "event_types",
+        "mlp_widths", "seeds", "robustness_noise_levels", "event_types", "release_states",
     ):
         if key in result and isinstance(result[key], list):
             result[key] = tuple(result[key])  # type: ignore[index]
@@ -33,6 +34,9 @@ def config_from_mapping(
     estreams_root: str | Path | None = None,
     camels_chem_root: str | Path | None = None,
     hyd_responses_root: str | Path | None = None,
+    bafu_root: str | Path | None = None,
+    bafu_statistics_zip: str | Path | None = None,
+    bafu_return_levels: str | Path | None = None,
 ) -> RegionalExperimentConfig:
     """Build the typed service configuration from saved/resolved JSON."""
     try:
@@ -108,6 +112,10 @@ def config_from_mapping(
         hyd_responses_root=resolved_hyd if resolved_hyd not in (None, "") else None,
         hyd_responses_features=tuple(map(str, hyd_features)),
         hyd_responses_static=hyd_static,
+        benchmark=BenchmarkConfig(**_dataclass_values(BenchmarkConfig, section("benchmark"))),
+        bafu_root=bafu_root if bafu_root is not None else value.get("bafu_root"),
+        bafu_statistics_zip=bafu_statistics_zip if bafu_statistics_zip is not None else value.get("bafu_statistics_zip"),
+        bafu_return_levels=bafu_return_levels if bafu_return_levels is not None else value.get("bafu_return_levels"),
     )
 
 

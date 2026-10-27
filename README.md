@@ -169,6 +169,29 @@ CAMELS-CH-Chem datasets are read from their own extracted directories; their
 paths can be supplied at launch or in **Data and features**. The datasets are
 not copied into the repository.
 
+### Dataset downloads
+
+Download and extract the datasets you need, then set their paths in
+`api-server.json` or through the app's dataset settings. CAMELS-CH is required;
+the other sources provide optional predictors or benchmark verification data.
+
+| Dataset | Use in this project | Download source |
+| --- | --- | --- |
+| CAMELS-CH | Daily discharge, meteorological inputs, and catchment attributes | [Zenodo](https://zenodo.org/records/15025258): download `camels_ch.zip`. |
+| EStreams v1.4 | Optional vegetation and snow-cover predictors | [Zenodo](https://zenodo.org/records/17598150): separate ZIP archives for attributes, gauge metadata, and other components. |
+| CAMELS-CH-Chem v1.0 | Optional agriculture, livestock, atmospheric deposition, and rain-isotope predictors | [Zenodo](https://zenodo.org/records/16158375): download `camels-ch-chem.zip`. |
+| HYD-RESPONSES v1 | Optional soil moisture, snowmelt, snow water equivalent, and catchment descriptors | [Zenodo](https://zenodo.org/records/14713275): version cited by the local dataset README. |
+| BAFU / FOEN hydrological observations | Gauge discharge observations for BAFU benchmarks | [Download browser](https://data.bafu.admin.ch/download/) and [dataset documentation](https://data.bafu.admin.ch/en/dataproduct-water-observations). |
+| BAFU flood statistics (HQStat) | Reference flood statistics for benchmark verification | [Official geodata downloads](https://www.bafu.admin.ch/de/wasser-geodaten): choose **Hochwasserstatistik HQStat**. |
+| BAFU low-flow statistics (NQStat) | Low-flow reference data | [Official geodata downloads](https://www.bafu.admin.ch/de/wasser-geodaten): choose **Niedrigwasserstatistik NQStat**. |
+| HANZE v3.0.1 beta | Historical flood-impact catalogue and regional boundaries | [Zenodo](https://zenodo.org/records/20478847). |
+
+CAMELS-CH snow and canopy-storage features use files from the main CAMELS-CH
+download; no separate water-state dataset is needed. The low-flow statistics
+archives are present in the local workspace but are not registered in the
+current `api-server.json`. See [BAFU benchmarks](ensemble_review/BAFU_BENCHMARKS.md)
+for benchmark-specific setup.
+
 ## Run the app
 
 ```bash

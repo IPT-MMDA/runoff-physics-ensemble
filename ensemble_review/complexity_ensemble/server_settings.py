@@ -20,12 +20,20 @@ class DatasetRegistration:
 
 
 @dataclass(frozen=True)
+class HydropowerSettings:
+    enabled: bool = True
+    geopackage: Path | None = None
+    layer: str | None = None
+
+
+@dataclass(frozen=True)
 class ServerSettings:
     storage_dir: Path
     datasets: dict[str, DatasetRegistration] = field(default_factory=dict)
     results_dir: Path | None = None
     token: str | None = None
     cors_origins: tuple[str, ...] = ()
+    hydropower: HydropowerSettings = field(default_factory=HydropowerSettings)
 
     @property
     def runs_dir(self):
@@ -39,7 +47,7 @@ class ServerSettings:
     def load(cls, path: str | Path, *, token: str | None = None):
         path = Path(path).resolve()
         raw = json.loads(path.read_text())
-        unknown = set(raw) - {"storage_dir", "datasets", "results_dir", "cors_origins"}
+        unknown = set(raw) - {"storage_dir", "datasets", "results_dir", "cors_origins", "hydropower"}
         if unknown:
             raise ValueError(f"unknown server settings: {sorted(unknown)}")
         def local(value):
@@ -61,6 +69,16 @@ class ServerSettings:
                 local(value["bafu_return_levels"]) if value.get("bafu_return_levels") else None,
                 local(value["hanze_root"]) if value.get("hanze_root") else None,
             )
+        hydro_raw = raw.get("hydropower", {})
+        if not isinstance(hydro_raw, dict):
+            raise ValueError("hydropower settings must be an object")
+        if set(hydro_raw) - {"enabled", "geopackage", "layer"}:
+            raise ValueError(f"unknown hydropower settings: {sorted(set(hydro_raw) - {'enabled', 'geopackage', 'layer'})}")
+        geopackage = local(hydro_raw["geopackage"]) if hydro_raw.get("geopackage") else None
+        layer = str(hydro_raw["layer"]).strip() if hydro_raw.get("layer") else None
+        if layer == "":
+            raise ValueError("hydropower.layer must be a non-empty layer name when provided")
+        hydropower = HydropowerSettings(bool(hydro_raw.get("enabled", True)), geopackage, layer)
         return cls(local(raw.get("storage_dir", "artifacts/api")), datasets,
                    local(raw["results_dir"]) if raw.get("results_dir") else None,
-                   token, tuple(raw.get("cors_origins", ())))
+                   token, tuple(raw.get("cors_origins", ())), hydropower)

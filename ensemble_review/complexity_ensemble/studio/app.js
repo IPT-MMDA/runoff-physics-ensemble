@@ -1,5 +1,6 @@
 import { allPages, hanzeMetricDefinitions, hanzePerformance, floodMetricDefinitions, floodPerformance, floodScoreText, floodScoreColor, basinAvailability, basinCompatibilityLoaded, coerce, configureBafuTask, finite, format, meanByDate, pretty, terminal, useBenchmarkCoverage } from "./core.js";
 import { BasinAtlas, chart } from "./charts.js?v=fixed-sky-blue-1";
+import { HydropowerView } from "./hydropower.js";
 
 const $ = selector => document.querySelector(selector);
 const state = { token: sessionStorage.getItem("runoff.token") || "", datasets: [], basins: [], selected: new Set(), datasetCache: new Map(), predictions: new Map(), runs: [], totalRuns: 0, connected: false, bindings: [], run: null, job: null, pollTimer: null, replay: null, playTimer: null, datasetVersion: 0, resultVersion: 0, pageVersion: 0 };
@@ -264,6 +265,7 @@ async function loadDataset({ retain = false } = {}) {
   }
 }
 async function connect() {
+  hydropower.reset();
   notice(""); setConnection(false, "Connecting");
   const [bootstrap, datasets, capabilities, health] = await Promise.all([api("/ui/bootstrap"), api("/datasets"), api("/capabilities"), api("/health")]);
   state.bootstrap = bootstrap; state.capabilities = capabilities; state.datasets = datasets.items;
@@ -285,6 +287,7 @@ async function connect() {
   if (!health.worker_ready) notice("The workspace is connected. Start the training worker to process submitted jobs.");
   await loadDataset({ retain: true }).catch(error => notice(error.message, true));
   await loadRuns();
+  if (location.hash === "#hydropower") await hydropower.activate();
   try { const saved = JSON.parse(sessionStorage.getItem("runoff.job")); if (saved?.job_id && !state.job) { state.job = saved; schedulePoll(0); } } catch { /* No resumable job. */ }
 }
 async function healthCheck() {
@@ -563,12 +566,14 @@ function renderReplayDay() {
   chart("#replay-flow", [{ name: "Predicted", points: toPoints("predicted") }, { name: "Observed", points: toPoints("observed") }], { marker });
   renderData($("#replay-snapshot"), days[day - 1]);
 }
+const hydropower = new HydropowerView(api, renderTable);
 function navigate() {
-  const route = location.hash.slice(1) || "experiments", target = ["experiments", "runs", "compare", "replay", "impact"].includes(route) ? route : "experiments";
+  const route = location.hash.slice(1) || "experiments", target = ["experiments", "runs", "compare", "replay", "impact", "hydropower"].includes(route) ? route : "experiments";
   document.querySelectorAll(".view").forEach(node => { node.hidden = node.id !== target; });
   document.querySelectorAll(".header nav a").forEach(node => { node.classList.toggle("active", node.hash === `#${target}`); if (node.hash === `#${target}`) node.setAttribute("aria-current", "page"); else node.removeAttribute("aria-current"); });
   if (target !== "replay") stopPlayback();
   if (target === "experiments") atlas.draw();
+  if (target === "hydropower" && state.connected) hydropower.activate();
 }
 
 // The progress panel follows every workflow and remains visible across tabs.

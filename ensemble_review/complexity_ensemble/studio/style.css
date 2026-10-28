@@ -26,3 +26,9 @@
 #hanze-performance{border-top:1px solid var(--line);padding-top:22px;margin:22px 0}
 #hanze-status{white-space:pre-line;margin:12px 0}
 #hanze-average,#hanze-selected{grid-template-columns:repeat(2,minmax(0,1fr))}
+
+#hydropower-map{height:560px;border:1px solid var(--line);border-radius:8px;background:#edf3f7;isolation:isolate}
+#hydropower-status,#hydropower-summary{margin:12px 0}
+#hydropower-table{max-height:480px;overflow:auto;margin:16px 0}
+.hydropower-legend{margin:12px 0;flex-wrap:wrap}
+@media(max-width:760px){#hydropower-map{height:400px}}

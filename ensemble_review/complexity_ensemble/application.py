@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from functools import cached_property
 
 from .configuration import config_from_mapping
 from .devices import resolve_device
@@ -83,6 +84,29 @@ class Application:
 
     def catalog_for_run(self, run_id):
         return self.catalog(self.dataset_for_run(run_id))
+
+    @cached_property
+    def hydropower_sites(self):
+        """Load the inventory on demand; unrelated workflows need no map data."""
+        from .hydropower import default_hydropower_path, ensure_hydropower_gpkg, load_hydropower_sites
+        if not self.settings.hydropower.enabled:
+            raise ValueError("Hydropower monitoring is disabled in server settings.")
+        path = self.settings.hydropower.geopackage or default_hydropower_path()
+        if path.is_file() or path == default_hydropower_path():
+            ensure_hydropower_gpkg(path)
+        return load_hydropower_sites(path, layer=self.settings.hydropower.layer)
+
+    def hydropower_forecast(self, run_id, target_date=None):
+        from .hydropower import load_saved_run_predictions, prepare_hydropower_forecast, hydropower_map_payload
+        dataset_id = self.dataset_for_run(run_id)
+        predictions = load_saved_run_predictions(self.runs.artifact(run_id, "predictions"))
+        sites, day = prepare_hydropower_forecast(
+            predictions, self.catalog(dataset_id), self.hydropower_sites, target_date)
+        payload = hydropower_map_payload(sites, target_date=day.isoformat())
+        return {"run_id": run_id, "dataset_id": dataset_id, "map": payload,
+                "available_dates": sorted({row.target_date.isoformat() for row in predictions.predictions}),
+                "matched": int(sites["basin_id"].notna().sum()),
+                "with_change": int(sites["change_pct"].notna().sum()), "total": len(sites)}
 
     def evaluate_hanze(self, dataset_id, predictions, config):
         root = self.registration(dataset_id).hanze_root

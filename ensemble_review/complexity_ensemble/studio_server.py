@@ -37,7 +37,8 @@ def create_studio(settings, *, native_ui=None, application=None, store=None):
         with gr.Blocks(title="Runoff · Gradio") as native_ui:
             gr.Markdown("# Runoff research workspace\n\n"
                         "[Open the custom workspace](/) · [HTTP API documentation](/docs)\n\n"
-                        "Launch with `--native-dataset DATASET_ID` to also enable the original "
+                        "[Open hydropower monitoring](/#hydropower)\n\n"
+                        "Launch with `--native-dataset DATASET_ID` to enable the original "
                         "Gradio experiment interface here.")
     return gr.mount_gradio_app(app, native_ui, path="/gradio",
                                auth=("runoff", settings.token) if settings.token else None)
@@ -48,7 +49,7 @@ def main():
     parser.add_argument("--settings", type=Path, required=True)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7860)
-    parser.add_argument("--native-dataset", help="Also mount the original Gradio UI for this dataset")
+    parser.add_argument("--native-dataset", help="Also mount the original Gradio UI at /gradio for this registered dataset")
     args = parser.parse_args()
     token = os.environ.get("RUNOFF_API_TOKEN")
     if args.host not in {"127.0.0.1", "localhost", "::1"} and not token:

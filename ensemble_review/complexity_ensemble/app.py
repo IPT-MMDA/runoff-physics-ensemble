@@ -21,6 +21,11 @@ from .design.config_help import config_info
 from .design.dataset_help import dataset_info
 from .estreams import ESTREAMS_DYNAMIC_FEATURES
 from .hyd_responses import HYDResponses, DEFAULT_HYD_RESPONSES_FEATURES
+from .hydropower import (
+    default_hydropower_path, ensure_hydropower_gpkg, load_hydropower_sites,
+    prepare_hydropower_forecast, hydropower_map_payload, hydropower_table_rows,
+    load_saved_run_predictions,
+)
 from .paved_scenario import PavedSiteConfig
 from .rainfall_replay import (
     export_gif, forecast_snapshot, replay_figures,
@@ -167,6 +172,109 @@ setTimeout(() => map.invalidateSize(), 0);
 watch('value', () => {
     if (basinLayer) basinLayer.setStyle(styleFeature);
 });
+"""
+
+
+_HYDROPOWER_MAP_TEMPLATE = """
+<div class="hydropower-map-shell">
+  <div class="hydropower-map-canvas" role="application" aria-label="Hydropower forecast map"></div>
+  <div class="hydropower-map-legend">
+    <span><i class="falling"></i>Flow decreases</span>
+    <span><i class="stable"></i>Little/no change</span>
+    <span><i class="rising"></i>Flow increases</span>
+    <span><i class="missing"></i>No matched forecast</span>
+  </div>
+</div>
+"""
+
+_HYDROPOWER_MAP_CSS = """
+.hydropower-map-shell { position: relative; width: 100%; }
+.hydropower-map-canvas { width: 100%; height: 560px; border: 1px solid var(--border-color-primary); border-radius: 10px; overflow: hidden; background: #edf3f7; }
+.hydropower-map-legend { position: absolute; z-index: 500; left: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px 12px; max-width: calc(100% - 24px); padding: 7px 10px; border-radius: 7px; background: rgba(255,255,255,.94); box-shadow: 0 1px 5px rgba(15,23,42,.22); color: #1e293b; font-size: 12px; }
+.hydropower-map-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.hydropower-map-legend i { width: 11px; height: 11px; border: 1px solid #475569; border-radius: 50%; }
+.hydropower-map-legend .falling { background: #d73027; }
+.hydropower-map-legend .stable { background: #ffffbf; }
+.hydropower-map-legend .rising { background: #1a9850; }
+.hydropower-map-legend .missing { background: #9ca3af; }
+.hydropower-map-shell .leaflet-container { font-family: inherit; }
+.hydropower-map-shell .leaflet-tooltip { color: #0f172a; }
+"""
+
+_HYDROPOWER_MAP_JS = r"""
+const canvas = element.querySelector('.hydropower-map-canvas');
+if (!window.L) {
+  canvas.innerHTML = '<div style="padding:2rem;color:#991b1b">The map library could not be loaded. Check the browser network connection and reload.</div>';
+  return;
+}
+const map = L.map(canvas, {zoomControl:true, attributionControl:true, preferCanvas:true});
+const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18, attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+tileLayer.on('tileerror', () => {
+  // The vector markers remain usable even if the network blocks map tiles.
+  canvas.dataset.tilesUnavailable = 'true';
+});
+// featureGroup provides getBounds(), which is required to zoom to station markers.
+let plantLayer = L.featureGroup().addTo(map);
+const mapNotice = document.createElement('div');
+mapNotice.style.cssText = 'position:absolute;z-index:600;right:12px;top:12px;max-width:60%;padding:6px 9px;background:rgba(255,255,255,.94);border-radius:6px;font-size:12px;color:#334155;box-shadow:0 1px 4px #94a3b8';
+mapNotice.textContent = 'Loading station locations…';
+canvas.parentElement.appendChild(mapNotice);
+const escapeHtml = (raw) => String(raw ?? '').replace(/[&<>\'\"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+const fmt = (value, digits=2) => value === null || value === undefined || !Number.isFinite(Number(value)) ? 'n/a' : Number(value).toFixed(digits);
+const colorFor = (pct) => {
+  if (pct === null || pct === undefined || !Number.isFinite(Number(pct))) return '#9ca3af';
+  const v = Math.max(-50, Math.min(50, Number(pct)));
+  const stops = v < 0 ? [[215,48,39],[255,255,191]] : [[255,255,191],[26,152,80]];
+  const t = Math.abs(v)/50;
+  const rgb = stops[0].map((c,i)=>Math.round(c+(stops[1][i]-c)*t));
+  return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+};
+const render = () => {
+  let data = props.value || {type:'FeatureCollection',features:[]};
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); } catch (_) { data = {type:'FeatureCollection',features:[]}; }
+  }
+  if (data && data.value && data.features === undefined) data = data.value;
+  plantLayer.clearLayers();
+  const features = Array.isArray(data.features) ? data.features : [];
+  let rendered = 0;
+  for (const feature of features) {
+    const coords = feature.geometry && feature.geometry.coordinates;
+    if (!coords || feature.geometry.type !== 'Point') continue;
+    const p = feature.properties || {};
+    const pct = p.change_pct;
+    const color = colorFor(pct);
+    const marker = L.circleMarker([coords[1],coords[0]], {
+      radius: 7, color: '#263238', weight: 1, fillColor: color, fillOpacity: .92
+    });
+    const status = escapeHtml(p.status || 'No forecast');
+    const popup = `<strong>${escapeHtml(p.name || 'Hydropower plant')}</strong><br>` +
+      `Basin: ${escapeHtml(p.basin_id || 'unmatched')}<br>` +
+      `Forecast date: ${escapeHtml(data.target_date || 'not selected')}<br>` +
+      `Predicted flow: ${fmt(p.predicted_m3_s)} m³/s<br>` +
+      `Previous day: ${fmt(p.previous_m3_s)} m³/s<br>` +
+      `Change: ${p.change_pct === null || p.change_pct === undefined ? 'n/a' : fmt(p.change_pct,1)+'%'}<br>` +
+      `Status: ${status}`;
+    marker.bindTooltip(escapeHtml(p.name || 'Hydropower plant'), {direction:'top'});
+    marker.bindPopup(popup);
+    marker.addTo(plantLayer);
+    rendered += 1;
+  }
+  mapNotice.textContent = rendered
+    ? `Stations shown: ${rendered.toLocaleString()}${canvas.dataset.tilesUnavailable === 'true' ? ' · Basemap tiles unavailable (check internet)' : ''}`
+    : `No station points in map payload (${features.length} features received). Check GeoPackage layer / CRS.`;
+  if (rendered) {
+    const bounds = plantLayer.getBounds();
+    if (bounds.isValid()) map.fitBounds(bounds, {padding:[22,22], maxZoom:10});
+  } else {
+    map.setView([46.8,8.2], 7);
+  }
+  setTimeout(() => map.invalidateSize(), 0);
+};
+render();
+watch('value', render);
 """
 
 
@@ -392,6 +500,9 @@ def build_app(
     save_results: bool = False,
     results_dir: str | Path = DEFAULT_RESULTS_DIRECTORY,
     executor=None,
+    hydropower_path: str | Path | None = None,
+    hydropower_layer: str | None = None,
+    hydropower_enabled: bool = True,
 ):
     """Build a session-scoped Gradio Blocks application."""
     try:
@@ -406,6 +517,27 @@ def build_app(
     results_dir = Path(results_dir)
     snapshot = discover_runs(results_dir)
     saved_runs = list(snapshot.runs)
+    hydropower_path = Path(hydropower_path).expanduser().resolve() if hydropower_path else default_hydropower_path()
+    hydropower_sites = None
+    hydropower_load_message = ""
+    try:
+        if not hydropower_enabled:
+            hydropower_load_message = "Hydropower monitoring is disabled in server settings."
+        else:
+            # Automatically fetch the official inventory only for the default path;
+            # an explicitly configured missing file should produce a clear error.
+            if hydropower_path.is_file() or hydropower_path == default_hydropower_path():
+                ensure_hydropower_gpkg(hydropower_path, timeout=8)
+            hydropower_sites = load_hydropower_sites(hydropower_path, layer=hydropower_layer)
+            hydropower_load_message = (
+                f"Loaded {len(hydropower_sites):,} hydropower plant locations from "
+                f"`{hydropower_path}`. Source layer: `{hydropower_layer or 'auto-detected'}`."
+            )
+    except Exception as error:
+        hydropower_load_message = (
+            "The hydropower GeoPackage could not be loaded. The rest of the app remains available. "
+            f"Check the `hydropower` settings in api-server.json. Details: {error}"
+        )
 
     with gr.Blocks(title="Regional hydrology and land assessment platform with heterogeneous ensembles") as app:
         token_state = gr.State(None)
@@ -830,6 +962,58 @@ def build_app(
             with gr.Row(): routing_plot=gr.Plot(label="Complex-expert usage"); loss_plot=gr.Plot(label="Loss traces")
             metrics=gr.JSON(label="Metrics"); extremes=gr.Dataframe(label="Extreme-event results")
             with gr.Row(): predictions_file=gr.File(label="Predictions CSV"); metrics_file=gr.File(label="Metrics CSV"); config_file=gr.File(label="Resolved config"); archive_file=gr.File(label="Run archive")
+
+        with gr.Tab("Hydropower monitoring"):
+            gr.Markdown(
+                "## Hydropower forecast map\n"
+                "Each plant is shown as a point. **Red** means predicted discharge decreases versus the previous calendar day; "
+                "**green** means it increases; yellow means little/no change. Gray points have no matched forecast. "
+                "Choose a saved run to inspect its predictions.csv without retraining, or leave the run selector blank to use the current session. "
+                "This is not a live operational forecast unless the selected run contains future target dates."
+            )
+            gr.Markdown(hydropower_load_message)
+            saved_hydro_choices = [(item.label, item.run_id) for item in saved_runs
+                                   if (item.path / "predictions.csv").is_file()]
+            with gr.Row():
+                hydropower_run = gr.Dropdown(
+                    choices=saved_hydro_choices,
+                    value=(saved_hydro_choices[0][1] if saved_hydro_choices else None),
+                    label="Saved model run (optional; blank = current session)",
+                    allow_custom_value=False,
+                )
+                hydropower_date = gr.Textbox(
+                    label="Forecast date (YYYY-MM-DD; blank = latest date in selected run)",
+                    placeholder="Leave blank to use latest available prediction date",
+                )
+                build_hydropower = gr.Button("Update hydropower map", variant="primary")
+            initial_hydro_payload = (
+                hydropower_map_payload(hydropower_sites)
+                if hydropower_sites is not None else {"type": "FeatureCollection", "features": [], "target_date": None}
+            )
+            hydropower_map = gr.HTML(
+                value=initial_hydro_payload,
+                label="Hydropower plants — day-over-day discharge change",
+                html_template=_HYDROPOWER_MAP_TEMPLATE,
+                css_template=_HYDROPOWER_MAP_CSS,
+                js_on_load=_HYDROPOWER_MAP_JS,
+                head=_LEAFLET_HEAD,
+                apply_default_css=False,
+                container=True,
+                padding=False,
+            )
+            hydropower_status = gr.Markdown(
+                "Run an experiment first, then select a date and update the map."
+            )
+            hydropower_table = gr.Dataframe(
+                headers=["Plant", "Matched basin", "Forecast flow (m³/s)", "Previous day (m³/s)", "Change (%)", "Status"],
+                value=[], interactive=False, label="Hydropower plant forecasts",
+            )
+            if hydropower_path.is_file():
+                gr.File(value=str(hydropower_path), label="Local hydropower station GeoPackage")
+            gr.Markdown(
+                "Station inventory: [Swiss Federal Office of Energy — Statistics on hydropower plants (WASTA)](https://opendata.swiss/en/dataset/statistik-der-wasserkraftanlagen-wasta). "
+                "The inventory covers Swiss plants with output of at least 300 kW. Forecasts are attached only when a plant point falls within a CAMELS-CH catchment with predictions."
+            )
 
         with gr.Tab("Saved-run leaderboard"):
             persistence_note = (
@@ -1467,6 +1651,47 @@ the leaderboard lets you revisit and compare saved runs.
         future_map.input(
             activate_from_map, inputs=[future_map,experiment_state], outputs=result_outputs
         )
+        def update_hydropower_map(result, saved_run_id, date_text):
+            if hydropower_sites is None:
+                return {"type": "FeatureCollection", "features": [], "target_date": None}, [], (
+                    "Hydropower station data are unavailable. " + hydropower_load_message
+                )
+            try:
+                source_label = "current session"
+                if saved_run_id:
+                    selected_run = next((item for item in saved_runs if item.run_id == saved_run_id), None)
+                    if selected_run is None:
+                        raise ValueError("Selected saved run is no longer in the loaded registry. Refresh/restart the app and try again.")
+                    result = load_saved_run_predictions(selected_run.path)
+                    source_label = f"saved run `{selected_run.run_id}`"
+                if result is None or not getattr(result, "predictions", None):
+                    return hydropower_map_payload(hydropower_sites), [], (
+                        "No predictions are available. Select a saved run with predictions.csv or run an experiment first."
+                    )
+                forecast_sites, selected_date = prepare_hydropower_forecast(
+                    result, catalog, hydropower_sites, date_text
+                )
+                payload = hydropower_map_payload(forecast_sites, target_date=selected_date.isoformat())
+                rows = hydropower_table_rows(forecast_sites)
+                matched = int(forecast_sites["basin_id"].notna().sum())
+                with_change = int(forecast_sites["change_pct"].notna().sum())
+                note = (
+                    f"Source: {source_label}. Showing {selected_date.isoformat()}. Matched forecasts: {matched}/{len(forecast_sites)} plants; "
+                    f"day-over-day change available for {with_change}. Change is based on the mean prediction across ensemble seeds."
+                )
+                if selected_date != max(item.target_date for item in result.predictions):
+                    note += " This is a historical/back-test date from the current run, not necessarily tomorrow."
+                return payload, rows, note
+            except (ValueError, OSError, KeyError) as error:
+                return hydropower_map_payload(hydropower_sites), [], f"Could not build hydropower map: {error}"
+    
+        build_hydropower.click(
+            update_hydropower_map,
+            inputs=[experiment_state, hydropower_run, hydropower_date],
+            outputs=[hydropower_map, hydropower_table, hydropower_status],
+            queue=False,
+        )
+    
     return app.queue(default_concurrency_limit=1)
 
 

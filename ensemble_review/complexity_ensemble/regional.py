@@ -1171,7 +1171,7 @@ def _rolling_test_predictions(
                     )
                     value = float(output.discharge[0, 0].cpu()) * scale
                     predicted_flow[day] = value
-                    residual = float(model.physics_residual(output.discharge, physical).square()[0].cpu()) if model.physics_available else float("nan")
+                    residual = float(model.physics_residual(output.discharge, physical).square()[0].cpu()) if getattr(model, "physics_available", False) else float("nan")
                     result.append(PredictionRecord(
                         seed, basin, day, float(data.test.targets[index]) * scale, value,
                         float(output.complex_weight[0].cpu()), residual,
@@ -1619,7 +1619,7 @@ def run_regional_experiment(
                         predictions.append(PredictionRecord(
                             seed, data.test.basin_ids[index], data.test.target_dates[index],
                             float(observed[index]), float(predicted[index]),
-                            float(output.complex_weight[index].cpu()), float(residual[index]) if model.physics_available else float("nan"),
+                            float(output.complex_weight[index].cpu()), float(residual[index]) if getattr(model, "physics_available", False) else float("nan"),
                             float(ood_score[index].cpu()),
                             float(detector.threshold.cpu()) if detector is not None else float("nan"),
                             data.test.target_dates[index] - timedelta(days=1), 1,

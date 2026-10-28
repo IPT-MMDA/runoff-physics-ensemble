@@ -9,5 +9,10 @@
       "hanze_root": "/absolute/path/to/hanze"
     }
   },
-  "cors_origins": []
+  "cors_origins": [],
+  "hydropower": {
+    "enabled": true,
+    "geopackage": "data/hydropower_ch.gpkg",
+    "layer": "hydropower_ch1__hydropowerplant"
+  }
 }

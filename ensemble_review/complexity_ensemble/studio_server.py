@@ -66,7 +66,10 @@ def main():
             dataset.data_root, estreams_root=dataset.estreams_root,
             camels_chem_root=dataset.camels_chem_root, hyd_responses_root=dataset.hyd_responses_root,
             save_results=False, results_dir=settings.results_dir or settings.runs_dir,
-            executor=RemoteExecutor(f"http://{loopback}:{args.port}", args.native_dataset, token))
+            executor=RemoteExecutor(f"http://{loopback}:{args.port}", args.native_dataset, token),
+            hydropower_path=settings.hydropower.geopackage,
+            hydropower_layer=settings.hydropower.layer,
+            hydropower_enabled=settings.hydropower.enabled)
     import uvicorn
     uvicorn.run(create_studio(settings, native_ui=native_ui), host=args.host, port=args.port)
 

@@ -349,3 +349,11 @@ job lifecycle, storage, and remote Gradio/CLI execution.
 The API workspace supports BAFU-only and combined predictor experiments,
 read-only coverage audits, fixed evaluation fingerprints and shared flood
 verification. See [BAFU benchmarks](ensemble_review/BAFU_BENCHMARKS.md).
+
+## Hydropower monitoring map
+
+The Gradio application includes a **Hydropower monitoring** tab. On first launch it attempts to download and cache the official Swiss Federal Office of Energy WASTA hydropower-station inventory as `data/hydropower_ch.gpkg` (override the location with `HYDROPOWER_GPKG`). Source: [WASTA statistics on hydropower plants](https://opendata.swiss/en/dataset/statistik-der-wasserkraftanlagen-wasta). The source inventory covers Swiss hydropower plants with output of at least 300 kW.
+
+In the Hydropower monitoring tab, select a saved model run (loaded from the run registry and its `predictions.csv`) or leave the selector on the current session, choose a target date, and update the map. This lets you inspect previously completed experiments without retraining. Plant points are colored red-to-green by the change in the modelled basin discharge relative to the previous calendar day. The tooltip/table show the predicted and previous-day flow (m³/s where a basin area attribute is available), change percentage, and matched CAMELS-CH basin. Plants that cannot be spatially matched to a catchment with a prediction remain gray. The current model's predictions are experiment/back-test outputs; they are not automatically a live forecast for tomorrow. A genuine operational day-ahead workflow requires future-target forecasts and the corresponding meteorological inputs.
+
+The inventory is fetched automatically if no local file is present, so the first launch needs internet access. For offline deployments, place the official WASTA GeoPackage at `data/hydropower_ch.gpkg` or set `HYDROPOWER_GPKG` to its path before launching the app.

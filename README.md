@@ -305,9 +305,15 @@ drafts are saved in browser local storage; an active job reconnects after refres
 the same tab. Result charts let you select a catchment and forecast lead day, with
 time series averaged across seeds. Complete predictions remain in the exports.
 
-To also use the original experiment interface at `/gradio`, add
-`--native-dataset camels-ch` to the studio command. Its training uses the same API
-and worker. The existing `complexity-ensemble-app` command remains available.
+Hydropower monitoring is available in the main workspace under **Hydropower**
+(`/#hydropower`) without extra startup flags. Select a catchment dataset, a completed
+run, and a prediction date; leave the date blank for the latest available prediction.
+
+To also use the original Gradio experiment interface at `/gradio`, add
+`--native-dataset camels-ch` to the studio command. This selects one registered
+dataset for that optional interface; it does not affect datasets available in the
+main workspace. Its training uses the same API and worker. The existing
+`complexity-ensemble-app` command remains available.
 
 For an authenticated server, set `RUNOFF_API_TOKEN` before launching the studio,
 then enter it through the workspace connection button. The token stays in tab
@@ -352,8 +358,30 @@ verification. See [BAFU benchmarks](ensemble_review/BAFU_BENCHMARKS.md).
 
 ## Hydropower monitoring map
 
-The Gradio application includes a **Hydropower monitoring** tab. On first launch it attempts to download and cache the official Swiss Federal Office of Energy WASTA hydropower-station inventory as `data/hydropower_ch.gpkg` (override the location with `HYDROPOWER_GPKG`). Source: [WASTA statistics on hydropower plants](https://opendata.swiss/en/dataset/statistik-der-wasserkraftanlagen-wasta). The source inventory covers Swiss hydropower plants with output of at least 300 kW.
+The main Studio workspace includes a **Hydropower** view at `/#hydropower`.
+Launch Studio normally; neither `--native-dataset` nor an extra worker flag is needed.
+Opening the view loads the station inventory on demand. Choose a registered catchment
+dataset and a completed model run, select a date (blank means latest), and click
+**Update map**. Use **Refresh runs** to find newly completed experiments without
+restarting Studio. Runs from the API storage and shared registry are included when
+their predictions and source dataset are available. Older runs are matched to a
+registered dataset by their original data path.
 
-In the Hydropower monitoring tab, select a saved model run (loaded from the run registry and its `predictions.csv`) or leave the selector on the current session, choose a target date, and update the map. This lets you inspect previously completed experiments without retraining. Plant points are colored red-to-green by the change in the modelled basin discharge relative to the previous calendar day. The tooltip/table show the predicted and previous-day flow (m³/s where a basin area attribute is available), change percentage, and matched CAMELS-CH basin. Plants that cannot be spatially matched to a catchment with a prediction remain gray. The current model's predictions are experiment/back-test outputs; they are not automatically a live forecast for tomorrow. A genuine operational day-ahead workflow requires future-target forecasts and the corresponding meteorological inputs.
+The map and table show predicted basin discharge, previous-day discharge, percent
+change, and matched catchment. Red means falling flow, yellow little/no change, and
+green rising flow. Gray means a matching prediction or a previous-day comparison is
+unavailable. Predictions are averaged across ensemble seeds. Flow in m³/s requires
+a basin area attribute. These experiment/back-test outputs are not automatically
+live forecasts; operational forecasts require future-target predictions and the
+corresponding meteorological inputs. Electricity generation is not calculated.
 
-The inventory is fetched automatically if no local file is present, so the first launch needs internet access. For offline deployments, place the official WASTA GeoPackage at `data/hydropower_ch.gpkg` or set `HYDROPOWER_GPKG` to its path before launching the app.
+The official Swiss Federal Office of Energy WASTA inventory covers Swiss hydropower
+plants with output of at least 300 kW. Source:
+[WASTA statistics on hydropower plants](https://opendata.swiss/en/dataset/statistik-der-wasserkraftanlagen-wasta).
+The local inventory is `data/hydropower_ch.gpkg`; override it with the `hydropower`
+server settings or `HYDROPOWER_GPKG`. The default inventory is downloaded if missing.
+Browser map assets and OpenStreetMap tiles need network access; the plant table
+remains available if the map library cannot load. See [configuration](HYDROPOWER_CONFIG.md).
+
+The optional Gradio interface at `/gradio` retains its **Hydropower monitoring** tab,
+including the ability to inspect the current session's experiment result.

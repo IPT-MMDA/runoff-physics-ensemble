@@ -49,7 +49,12 @@ class StudioTests(unittest.TestCase):
         self.assertNotIn('<dialog id="appearance"', page.text)
         self.assertNotIn("COMPLEXITY → UNDERSTANDING", page.text)
         self.assertNotIn('class="orbit-art"', page.text)
-        self.assertNotIn("studio-secret", self.client.get("/gradio/").text)
+        self.assertIn('href="#hydropower"', page.text)
+        self.assertIn('id="hydropower"', page.text)
+        self.assertIn('href="/gradio"', page.text)
+        gradio_page = self.client.get("/gradio/")
+        self.assertEqual(gradio_page.status_code, 200)
+        self.assertNotIn("studio-secret", gradio_page.text)
 
     def test_defaults_match_contract_and_job_runs_outside_ui(self):
         self.client.headers["Authorization"] = "Bearer studio-secret"

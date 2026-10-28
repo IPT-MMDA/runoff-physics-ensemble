@@ -59,6 +59,8 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
     def sanitize(message):
         message = str(message)
         roots = [str(settings.storage_dir), str(settings.results_dir)]
+        from .hydropower import default_hydropower_path
+        roots.append(str(settings.hydropower.geopackage or default_hydropower_path()))
         for registration in settings.datasets.values():
             roots.extend(str(v) for v in asdict(registration).values() if v is not None)
         for root in sorted(roots, key=len, reverse=True):
@@ -156,6 +158,44 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
                             "bafu_statistics_configured": registration.bafu_statistics_zip is not None,
                             "bafu_return_levels_configured": registration.bafu_return_levels is not None}
                            for key, registration in settings.datasets.items()]}
+
+    def require_hydropower():
+        if not settings.hydropower.enabled:
+            raise HTTPException(409, "Hydropower monitoring is disabled in server settings.")
+
+    @router.get("/hydropower/sites")
+    def hydropower_sites():
+        from .hydropower import hydropower_map_payload
+        require_hydropower()
+        try:
+            return hydropower_map_payload(application.hydropower_sites)
+        except OSError as exc:
+            raise HTTPException(422, "Hydropower station data are unavailable; check the server's GeoPackage configuration.") from exc
+
+    @router.get("/hydropower/runs")
+    def hydropower_runs():
+        """Only offer predictions whose source catchments are registered here."""
+        require_hydropower()
+        runs, warnings = application.runs.list()
+        items = []
+        skipped = len(warnings)
+        for run in runs:
+            try:
+                dataset_id = application.dataset_for_run(run.run_id)
+                application.runs.artifact(run.run_id, "predictions")
+            except (KeyError, ValueError, OSError):
+                skipped += 1
+                continue
+            items.append({"run_id": run.run_id, "dataset_id": dataset_id, "created_at": run.created_at})
+        return {"items": items, "skipped": skipped}
+
+    @router.get("/runs/{run_id}/hydropower")
+    def hydropower_forecast(run_id: str, target_date: date | None = None):
+        require_hydropower()
+        try:
+            return application.hydropower_forecast(run_id, target_date)
+        except OSError as exc:
+            raise HTTPException(422, "Hydropower station or prediction data are unavailable; check the server configuration.") from exc
 
     @router.get("/ui/bootstrap")
     def ui_bootstrap():

@@ -19,3 +19,18 @@ missing; if network access is unavailable, the rest of the app should still star
 After launching, open the local URL printed in the terminal and select **Hydropower monitoring**.
 For previously saved experiments, use the **Saved model run** selector in that tab. Saved runs are
 read from the configured results registry; they are not retrained.
+
+For the main Studio workspace, run:
+
+```bash
+complexity-ensemble-studio --settings api-server.json
+```
+
+Open `http://127.0.0.1:7860/#hydropower` (or click **Hydropower** in the navigation).
+Select a catchment dataset and completed run, leave the date blank for the latest
+prediction, and click **Update map**. **Refresh runs** picks up newly completed
+experiments. No native dataset flag or worker changes are needed; viewing saved
+predictions does not require the worker.
+
+The optional original Gradio interface remains at `/gradio`. To enable its full
+experiment interface, add `--native-dataset camels-ch` to the Studio command.

@@ -42,7 +42,9 @@ class MorsePotentialAssessment:
 
 def _slice_split(split: HydrologySplit, start: int, stop: int) -> HydrologySplit:
     return HydrologySplit(
-        split.inputs[start:stop], split.physical_inputs[start:stop], split.targets[start:stop],
+        split.inputs[start:stop],
+        split.physical_inputs[start:stop],
+        split.targets[start:stop],
         split.target_dates[start:stop],
         None if split.routing_inputs is None else split.routing_inputs[start:stop],
     )
@@ -79,10 +81,9 @@ def _pilot_utility(
     targets = split.targets.to(device)
     simple_prediction = simple(inputs)
     complex_prediction = complex_model(inputs)
-    data_advantage = (
-        (simple_prediction.squeeze(-1) - targets).square()
-        - (complex_prediction.squeeze(-1) - targets).square()
-    )
+    data_advantage = (simple_prediction.squeeze(-1) - targets).square() - (
+        complex_prediction.squeeze(-1) - targets
+    ).square()
     physics_advantage = (
         simple.physics_residual(simple_prediction, physical).square()
         - complex_model.physics_residual(complex_prediction, physical).square()
@@ -120,24 +121,36 @@ def collect_cross_fitted_utility(
         pilot_validation = _slice_split(train, prefix_stop, validation_stop)
         torch.manual_seed(seed + 1009 * fold)
         simple = SingleSimpleHydrologyModel(
-            data.feature_names, train.inputs.shape[1], data.discharge_scale,
+            data.feature_names,
+            train.inputs.shape[1],
+            data.discharge_scale,
             simple_kind=simple_kind,
         ).to(device)
         torch.manual_seed(seed + 1009 * fold)
         complex_model = SingleComplexHydrologyModel(
-            data.feature_names, train.inputs.shape[1], data.discharge_scale,
+            data.feature_names,
+            train.inputs.shape[1],
+            data.discharge_scale,
             complex_kind=complex_kind,
         ).to(device)
         for model in (simple, complex_model):
             train_hydrology_model(
-                model, pilot_train, epochs=pilot_epochs, batch_size=batch_size,
-                learning_rate=learning_rate, training_noise=0.0,
-                seed=seed + fold, device=device,
+                model,
+                pilot_train,
+                epochs=pilot_epochs,
+                batch_size=batch_size,
+                learning_rate=learning_rate,
+                training_noise=0.0,
+                seed=seed + fold,
+                device=device,
             )
         utilities.append(
             _pilot_utility(
-                simple, complex_model, pilot_validation,
-                physics_weight=physics_weight, compute_penalty=compute_penalty,
+                simple,
+                complex_model,
+                pilot_validation,
+                physics_weight=physics_weight,
+                compute_penalty=compute_penalty,
                 device=device,
             )
         )
@@ -209,19 +222,33 @@ def calibrate_learned_morse(
     device: torch.device | str = "cpu",
 ) -> tuple[LearnedHydrologyMorsePotential, MorseCalibrationReport]:
     inputs, utility = collect_cross_fitted_utility(
-        data, simple_kind=simple_kind, complex_kind=complex_kind,
-        folds=folds, pilot_epochs=pilot_epochs, batch_size=batch_size,
-        seed=seed, device=device,
+        data,
+        simple_kind=simple_kind,
+        complex_kind=complex_kind,
+        folds=folds,
+        pilot_epochs=pilot_epochs,
+        batch_size=batch_size,
+        seed=seed,
+        device=device,
     )
     potential, final_loss = train_morse_potential(
-        inputs, utility, data.feature_names, epochs=potential_epochs,
-        batch_size=max(2, batch_size), seed=seed, device=device,
+        inputs,
+        utility,
+        data.feature_names,
+        epochs=potential_epochs,
+        batch_size=max(2, batch_size),
+        seed=seed,
+        device=device,
     )
     scores = potential.complexity(inputs.flatten(start_dim=1).to(device)).cpu()
     report = MorseCalibrationReport(
-        len(inputs), folds, pilot_epochs, potential_epochs,
+        len(inputs),
+        folds,
+        pilot_epochs,
+        potential_epochs,
         float((utility > 0.0).float().mean()),
-        _spearman(scores, utility), final_loss,
+        _spearman(scores, utility),
+        final_loss,
     )
     return potential, report
 
@@ -244,28 +271,40 @@ def assess_learned_morse(
     device = resolve_device(device)
     torch.manual_seed(seed + 99991)
     simple = SingleSimpleHydrologyModel(
-        data.feature_names, data.train.inputs.shape[1], data.discharge_scale,
+        data.feature_names,
+        data.train.inputs.shape[1],
+        data.discharge_scale,
         simple_kind=simple_kind,
     ).to(device)
     torch.manual_seed(seed + 99991)
     complex_model = SingleComplexHydrologyModel(
-        data.feature_names, data.train.inputs.shape[1], data.discharge_scale,
+        data.feature_names,
+        data.train.inputs.shape[1],
+        data.discharge_scale,
         complex_kind=complex_kind,
     ).to(device)
     for model in (simple, complex_model):
         train_hydrology_model(
-            model, data.train, epochs=pilot_epochs, batch_size=batch_size,
-            learning_rate=1e-3, training_noise=0.0, seed=seed + 17, device=device,
+            model,
+            data.train,
+            epochs=pilot_epochs,
+            batch_size=batch_size,
+            learning_rate=1e-3,
+            training_noise=0.0,
+            seed=seed + 17,
+            device=device,
         )
     assessments = []
     for split_name, split in (("validation", data.validation), ("test", data.test)):
         utility = _pilot_utility(
-            simple, complex_model, split, physics_weight=0.05,
-            compute_penalty=0.0, device=device,
+            simple,
+            complex_model,
+            split,
+            physics_weight=0.05,
+            compute_penalty=0.0,
+            device=device,
         )
-        scores = potential.complexity(
-            split.inputs.flatten(start_dim=1).to(device)
-        ).cpu()
+        scores = potential.complexity(split.inputs.flatten(start_dim=1).to(device)).cpu()
         top_count = max(1, round(top_fraction * len(scores)))
         score_mask = torch.zeros(len(scores), dtype=torch.bool)
         utility_mask = torch.zeros(len(scores), dtype=torch.bool)
@@ -274,7 +313,10 @@ def assess_learned_morse(
         positive = utility > 0.0
         assessments.append(
             MorsePotentialAssessment(
-                split_name, len(scores), _spearman(scores, utility), top_fraction,
+                split_name,
+                len(scores),
+                _spearman(scores, utility),
+                top_fraction,
                 float((score_mask & utility_mask).sum() / top_count),
                 float(positive[score_mask].float().mean()),
                 float(positive[~score_mask].float().mean()),

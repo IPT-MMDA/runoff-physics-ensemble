@@ -142,7 +142,9 @@ class RegistrySnapshot:
     warnings: tuple[str, ...] = ()
 
 
-def save_run(result: ExperimentResult, directory: str | Path = DEFAULT_RESULTS_DIRECTORY) -> SavedRun:
+def save_run(
+    result: ExperimentResult, directory: str | Path = DEFAULT_RESULTS_DIRECTORY
+) -> SavedRun:
     """Atomically add one experiment result to the shared run registry."""
     root = Path(directory)
     root.mkdir(parents=True, exist_ok=True)
@@ -196,13 +198,18 @@ def load_run(path: str | Path) -> SavedRun:
     if missing:
         raise ValueError("missing required fields: " + ", ".join(sorted(missing)))
     return SavedRun(
-        str(payload["run_id"]), str(payload["created_at"]), manifest.parent,
-        dict(payload["resolved_config"]), dict(payload["aggregate_metrics"]),
+        str(payload["run_id"]),
+        str(payload["created_at"]),
+        manifest.parent,
+        dict(payload["resolved_config"]),
+        dict(payload["aggregate_metrics"]),
         {str(key): dict(value) for key, value in payload.get("per_basin_metrics", {}).items()},
         dict(payload.get("routing_diagnostics", {})),
         {str(key): list(value) for key, value in payload.get("loss_traces", {}).items()},
-        list(payload.get("extreme_events", [])), list(payload.get("failures", [])),
-        int(payload.get("parameter_count", 0)), float(payload.get("runtime_seconds", 0.0)),
+        list(payload.get("extreme_events", [])),
+        list(payload.get("failures", [])),
+        int(payload.get("parameter_count", 0)),
+        float(payload.get("runtime_seconds", 0.0)),
         bool(payload.get("cancelled", False)),
         {str(key): dict(value) for key, value in payload.get("forecast_metrics", {}).items()},
         {str(key): list(value) for key, value in payload.get("drought_details", {}).items()},
@@ -229,11 +236,13 @@ def discover_runs(directory: str | Path = DEFAULT_RESULTS_DIRECTORY) -> Registry
 def filter_runs(runs: Iterable[SavedRun], selections: Mapping[str, object]) -> list[SavedRun]:
     """Return runs matching every non-empty setup selection."""
     normalized = {
-        field: display_value(value) for field, value in selections.items()
+        field: display_value(value)
+        for field, value in selections.items()
         if value not in (None, "", "Any")
     }
     return [
-        run for run in runs
+        run
+        for run in runs
         if all(run.value(field) == expected for field, expected in normalized.items())
     ]
 
@@ -250,13 +259,23 @@ def leaderboard_rows(runs: Iterable[SavedRun]) -> list[list[object]]:
     rows = []
     for run in runs:
         metrics = run.aggregate_metrics
-        rows.append([
-            run.run_id, run.created_at, run.value("strategy.approach"),
-            run.value("model.complex_expert"), run.value("model.simple_expert"),
-            run.value("strategy.epochs"), run.value("physics.optimization_mode"),
-            metrics.get("nse"), metrics.get("kge"), metrics.get("rmse_mm_day"),
-            metrics.get("physics_error"), run.parameter_count, run.runtime_seconds,
-        ])
+        rows.append(
+            [
+                run.run_id,
+                run.created_at,
+                run.value("strategy.approach"),
+                run.value("model.complex_expert"),
+                run.value("model.simple_expert"),
+                run.value("strategy.epochs"),
+                run.value("physics.optimization_mode"),
+                metrics.get("nse"),
+                metrics.get("kge"),
+                metrics.get("rmse_mm_day"),
+                metrics.get("physics_error"),
+                run.parameter_count,
+                run.runtime_seconds,
+            ]
+        )
     return rows
 
 
@@ -269,7 +288,18 @@ def read_predictions(run: SavedRun) -> list[dict[str, str]]:
 
 
 __all__ = [
-    "DEFAULT_RESULTS_DIRECTORY", "FILTER_FIELDS", "RegistrySnapshot", "SCHEMA_VERSION",
-    "SavedRun", "available_values", "discover_runs", "display_value", "filter_runs",
-    "leaderboard_rows", "load_run", "parse_bool", "read_predictions", "save_run",
+    "DEFAULT_RESULTS_DIRECTORY",
+    "FILTER_FIELDS",
+    "RegistrySnapshot",
+    "SCHEMA_VERSION",
+    "SavedRun",
+    "available_values",
+    "discover_runs",
+    "display_value",
+    "filter_runs",
+    "leaderboard_rows",
+    "load_run",
+    "parse_bool",
+    "read_predictions",
+    "save_run",
 ]

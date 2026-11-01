@@ -1,4 +1,5 @@
 """Conservation, symbolic execution, leakage and queued workflow checks."""
+
 from dataclasses import asdict, replace
 from datetime import date, timedelta
 import copy
@@ -16,37 +17,77 @@ import torch
 
 from complexity_ensemble.hydrology_data import HydrologySeries, load_camels_ch
 from complexity_ensemble.kan_case_study import (
-    BasinParameters, CaseStudyConfig, NeuralFlux, ReservoirFlux, StudyCancelled,
-    SymbolicFlux, distil_symbolic, prepare_data, run_case_study, save_case_study, simulate,
-    case_study_hardware, config_from_dict,
-    COMPARISON_MODELS, DEFAULT_COMPARISON_MODELS, kan_discovery_profiles,
-    BASE_SYMBOLIC_LIBRARY, COMPLEX_SYMBOLIC_LIBRARY,
+    BasinParameters,
+    CaseStudyConfig,
+    NeuralFlux,
+    ReservoirFlux,
+    StudyCancelled,
+    SymbolicFlux,
+    distil_symbolic,
+    prepare_data,
+    run_case_study,
+    save_case_study,
+    simulate,
+    case_study_hardware,
+    config_from_dict,
+    COMPARISON_MODELS,
+    DEFAULT_COMPARISON_MODELS,
+    kan_discovery_profiles,
+    BASE_SYMBOLIC_LIBRARY,
+    COMPLEX_SYMBOLIC_LIBRARY,
 )
 
 
 def small_config():
-    return CaseStudyConfig(source_basins=("source",), validation_basins=("validation",),
-        target_basins=("target",), train_start="2001-01-09", train_end="2001-01-30",
-        validation_start="2001-01-31", validation_end="2001-02-10",
-        test_start="2001-02-11", test_end="2001-02-25", warmup_days=8,
-        minimum_source_days=10, observation_budgets=(3, 6), teacher_epochs=2,
-        adaptation_epochs=2, teacher_width=3, kan_candidates=1, kan_steps=3,
-        kan_hidden=1, max_formula_ops=1000, max_distillation_samples_per_basin=15, device="cpu", selected_models=("kan_pure", "kan_tuned"),
-        sequence_length=3, neural_epochs=1, neural_batch_size=128, mlp_widths=(4,),
-        mamba_hidden_size=4, mamba_feed_forward_size=8, lstm_hidden_size=4)
+    return CaseStudyConfig(
+        source_basins=("source",),
+        validation_basins=("validation",),
+        target_basins=("target",),
+        train_start="2001-01-09",
+        train_end="2001-01-30",
+        validation_start="2001-01-31",
+        validation_end="2001-02-10",
+        test_start="2001-02-11",
+        test_end="2001-02-25",
+        warmup_days=8,
+        minimum_source_days=10,
+        observation_budgets=(3, 6),
+        teacher_epochs=2,
+        adaptation_epochs=2,
+        teacher_width=3,
+        kan_candidates=1,
+        kan_steps=3,
+        kan_hidden=1,
+        max_formula_ops=1000,
+        max_distillation_samples_per_basin=15,
+        device="cpu",
+        selected_models=("kan_pure", "kan_tuned"),
+        sequence_length=3,
+        neural_epochs=1,
+        neural_batch_size=128,
+        mlp_widths=(4,),
+        mamba_hidden_size=4,
+        mamba_feed_forward_size=8,
+        lstm_hidden_size=4,
+    )
 
 
 def synthetic_series():
     dates = tuple(date(2001, 1, 1) + timedelta(days=i) for i in range(56))
-    t = torch.arange(56.)
-    forcing = torch.stack((torch.where(t.remainder(6) < 2, 5., .2),
-                           3. * torch.sin(t / 5.), torch.ones(56) * .3), 1)
+    t = torch.arange(56.0)
+    forcing = torch.stack(
+        (torch.where(t.remainder(6) < 2, 5.0, 0.2), 3.0 * torch.sin(t / 5.0), torch.ones(56) * 0.3),
+        1,
+    )
     result = {}
     for i, basin in enumerate(("source", "validation", "target")):
         with torch.no_grad():
-            rows, _, _ = simulate(forcing, ReservoirFlux(), BasinParameters([-.2 * i, -1., .05 * i]))
-        result[basin] = HydrologySeries(dates, rows[:, 0], forcing,
-                                        ("precipitation", "temperature", "pet"), basin, "CH")
+            rows, _, _ = simulate(
+                forcing, ReservoirFlux(), BasinParameters([-0.2 * i, -1.0, 0.05 * i])
+            )
+        result[basin] = HydrologySeries(
+            dates, rows[:, 0], forcing, ("precipitation", "temperature", "pet"), basin, "CH"
+        )
     return result
 
 
@@ -57,8 +98,15 @@ class ProcessTests(unittest.TestCase):
         for selection in ((), ("mlp_bad_scope",), ("kan_pure", "kan_pure")):
             with self.assertRaisesRegex(ValueError, "comparison model"):
                 replace(small_config(), selected_models=selection).validate()
-        replace(small_config(), selected_models=("mlp_target_target",), source_basins=(), validation_basins=()).validate()
-        replace(small_config(), selected_models=("mlp_source_target",), validation_basins=()).validate()
+        replace(
+            small_config(),
+            selected_models=("mlp_target_target",),
+            source_basins=(),
+            validation_basins=(),
+        ).validate()
+        replace(
+            small_config(), selected_models=("mlp_source_target",), validation_basins=()
+        ).validate()
 
     def test_complex_discovery_is_separate_and_preserves_kan_architecture(self):
         config = replace(small_config(), selected_models=("kan_pure", "kan_tuned", "kan_complex"))
@@ -67,9 +115,13 @@ class ProcessTests(unittest.TestCase):
         self.assertEqual(standard[1], ("kan_pure", "kan_tuned"))
         self.assertEqual(standard[3], BASE_SYMBOLIC_LIBRARY)
         enhanced = complex_profile[2]
-        self.assertEqual((enhanced.teacher_epochs, enhanced.teacher_width, enhanced.kan_candidates), (50, 24, 6))
-        self.assertEqual((enhanced.kan_hidden, enhanced.kan_grid, enhanced.kan_steps),
-                         (config.kan_hidden, config.kan_grid, config.kan_steps))
+        self.assertEqual(
+            (enhanced.teacher_epochs, enhanced.teacher_width, enhanced.kan_candidates), (50, 24, 6)
+        )
+        self.assertEqual(
+            (enhanced.kan_hidden, enhanced.kan_grid, enhanced.kan_steps),
+            (config.kan_hidden, config.kan_grid, config.kan_steps),
+        )
         self.assertEqual(complex_profile[3], COMPLEX_SYMBOLIC_LIBRARY)
         larger = replace(config, teacher_epochs=60, teacher_width=32, kan_candidates=8)
         self.assertEqual(kan_discovery_profiles(larger)[1][2], larger)
@@ -86,8 +138,8 @@ class ProcessTests(unittest.TestCase):
 
     def test_complex_symbolic_functions_execute_with_gradients(self):
         storage, liquid, pet = sp.symbols("storage liquid pet")
-        flux = SymbolicFlux(storage ** 3 + sp.Abs(liquid) + sp.tanh(pet))
-        x = torch.tensor([[.5, -.2, .3]], requires_grad=True)
+        flux = SymbolicFlux(storage**3 + sp.Abs(liquid) + sp.tanh(pet))
+        x = torch.tensor([[0.5, -0.2, 0.3]], requires_grad=True)
         expected = x[:, 0] ** 3 + x[:, 1].abs() + x[:, 2].tanh()
         self.assertTrue(torch.allclose(flux(x), expected))
         flux(x).sum().backward()
@@ -96,7 +148,10 @@ class ProcessTests(unittest.TestCase):
     def test_hardware_choices_follow_shared_resolver_and_report_phase_fallbacks(self):
         self.assertEqual(case_study_hardware("cpu")["resolved"], "cpu")
         for selected, expected_kan in (("mps", "cpu"), ("cuda", "cuda")):
-            with patch("complexity_ensemble.kan_case_study.resolve_device", return_value=torch.device(selected)):
+            with patch(
+                "complexity_ensemble.kan_case_study.resolve_device",
+                return_value=torch.device(selected),
+            ):
                 hardware = case_study_hardware(selected)
             self.assertEqual(hardware["teacher"], selected)
             self.assertEqual(hardware["calibration"], selected)
@@ -114,27 +169,33 @@ class ProcessTests(unittest.TestCase):
     def test_unknown_job_kind_fails_before_reading_run_id(self):
         from types import SimpleNamespace
         from complexity_ensemble.worker import run_job
+
         store = SimpleNamespace(get=lambda job_id: {"cancel_requested": False})
         with self.assertRaisesRegex(ValueError, "Unsupported job kind.*restart"):
             run_job(None, store, {"id": "unknown", "kind": "future_study", "payload": {}}, "owner")
 
     def test_daily_conservation_nonnegative_states_and_gradients(self):
-        forcing = torch.tensor([[10., -3., .5], [0., 4., .2], [1200., 9., 1.], [0., 1., 1000.]])
+        forcing = torch.tensor(
+            [[10.0, -3.0, 0.5], [0.0, 4.0, 0.2], [1200.0, 9.0, 1.0], [0.0, 1.0, 1000.0]]
+        )
         params = BasinParameters()
         flux = NeuralFlux(3)
         rows, _, _ = simulate(forcing, flux, params)
         self.assertTrue((rows[:, :4] >= 0).all())
         self.assertLess(float(rows[:, 4].abs().max()), 2e-4)
-        self.assertAlmostEqual(float(forcing[:, 0].sum()),
-            float(rows[:, 0].sum() + rows[:, 1].sum() + rows[-1, 2] + rows[-1, 3]), places=3)
+        self.assertAlmostEqual(
+            float(forcing[:, 0].sum()),
+            float(rows[:, 0].sum() + rows[:, 1].sum() + rows[-1, 2] + rows[-1, 3]),
+            places=3,
+        )
         rows[:, 0].sum().backward()
         self.assertTrue(torch.isfinite(params.raw.grad).all())
         self.assertEqual(params.raw.numel(), 3)
 
     def test_symbolic_expression_is_executed_with_gradients(self):
         storage, liquid, pet = sp.symbols("storage liquid pet")
-        flux = SymbolicFlux(2 * storage + sp.tanh(liquid) - pet ** 2)
-        x = torch.tensor([[.2, .5, .1]], requires_grad=True)
+        flux = SymbolicFlux(2 * storage + sp.tanh(liquid) - pet**2)
+        x = torch.tensor([[0.2, 0.5, 0.1]], requires_grad=True)
         expected = 2 * x[:, 0] + torch.tanh(x[:, 1]) - x[:, 2] ** 2
         self.assertTrue(torch.allclose(flux(x), expected))
         flux(x).sum().backward()
@@ -148,16 +209,22 @@ class ProcessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "increasing"):
             replace(config, observation_budgets=(6, 3)).validate()
         with self.assertRaisesRegex(ValueError, "largest observation budget"):
-            prepare_data(replace(config, observation_budgets=(40,)), series_by_basin=synthetic_series())
+            prepare_data(
+                replace(config, observation_budgets=(40,)), series_by_basin=synthetic_series()
+            )
         data = synthetic_series()
         item = data["target"]
-        data["target"] = replace(item, dates=item.dates[1:], discharge=item.discharge[1:], forcings=item.forcings[1:])
+        data["target"] = replace(
+            item, dates=item.dates[1:], discharge=item.discharge[1:], forcings=item.forcings[1:]
+        )
         with self.assertRaisesRegex(ValueError, "contiguous"):
             prepare_data(config, series_by_basin=data)
 
     def test_cancellation_before_data_access(self):
         class Cancelled:
-            def is_cancelled(self): return True
+            def is_cancelled(self):
+                return True
+
         with self.assertRaises(StudyCancelled):
             run_case_study(small_config(), cancellation_token=Cancelled())
 
@@ -182,13 +249,26 @@ class ProcessTests(unittest.TestCase):
 
     def test_retired_regional_mode_fails_with_migration_guidance(self):
         from complexity_ensemble.configuration import config_from_mapping
-        from complexity_ensemble.regional import BasinScopeConfig, DateRange, DateSplitConfig, RegionalExperimentConfig
-        config = RegionalExperimentConfig(".", BasinScopeConfig(("target",), "all_basins"),
-            DateSplitConfig(DateRange("2001-01-01", "2001-01-30"),
-                            DateRange("2001-01-31", "2001-02-10"),
-                            DateRange("2001-02-11", "2001-02-25")))
+        from complexity_ensemble.regional import (
+            BasinScopeConfig,
+            DateRange,
+            DateSplitConfig,
+            RegionalExperimentConfig,
+        )
+
+        config = RegionalExperimentConfig(
+            ".",
+            BasinScopeConfig(("target",), "all_basins"),
+            DateSplitConfig(
+                DateRange("2001-01-01", "2001-01-30"),
+                DateRange("2001-01-31", "2001-02-10"),
+                DateRange("2001-02-11", "2001-02-25"),
+            ),
+        )
         old = asdict(config)
-        old["physics"].update(optimization_mode="distillation", kan_steps=50, distillation_teacher="hard_routing")
+        old["physics"].update(
+            optimization_mode="distillation", kan_steps=50, distillation_teacher="hard_routing"
+        )
         with self.assertRaisesRegex(ValueError, "separate KAN case study"):
             config_from_mapping(old).validate()
 
@@ -197,16 +277,26 @@ class NeuralComparisonTests(unittest.TestCase):
     def test_scopes_pool_all_target_budgets_and_reuse_source_fit(self):
         series = synthetic_series()
         series["second_target"] = replace(series["target"], basin_id="second_target")
-        config = replace(small_config(), target_basins=("target", "second_target"),
-            validation_basins=(), selected_models=("mlp_source_target", "mlp_target_target", "mlp_mixed_target"),
-            target_observation_budgets={"second_target": (4,)})
-        with patch("complexity_ensemble.kan_case_study._discover_source_equation", side_effect=AssertionError("KAN should be skipped")):
+        config = replace(
+            small_config(),
+            target_basins=("target", "second_target"),
+            validation_basins=(),
+            selected_models=("mlp_source_target", "mlp_target_target", "mlp_mixed_target"),
+            target_observation_budgets={"second_target": (4,)},
+        )
+        with patch(
+            "complexity_ensemble.kan_case_study._discover_source_equation",
+            side_effect=AssertionError("KAN should be skipped"),
+        ):
             result = run_case_study(config, series_by_basin=series)
         self.assertEqual(len(result["metrics"]), 12)
         self.assertEqual(len(result["model_fits"]), 5)
         self.assertEqual(result["equations"], [])
         self.assertEqual(result["hardware"]["kan_fitting"], "not_used")
-        self.assertEqual(result["audit"]["budget_scenarios"][1]["target_budgets"], {"target": 6, "second_target": 4})
+        self.assertEqual(
+            result["audit"]["budget_scenarios"][1]["target_budgets"],
+            {"target": 6, "second_target": 4},
+        )
         source = [r for r in result["model_fits"] if r["training_scope"] == "source"]
         self.assertEqual(len(source), 1)
         self.assertEqual(source[0]["training_labels"], {"source": 22})
@@ -215,29 +305,46 @@ class NeuralComparisonTests(unittest.TestCase):
                 target_budget = 3 if fitted["scenario"] == 1 else 6
                 self.assertEqual(fitted["training_labels"]["target"], target_budget)
                 self.assertEqual(fitted["training_labels"]["second_target"], 4)
-                self.assertEqual("source" in fitted["training_labels"], fitted["training_scope"] == "mixed")
+                self.assertEqual(
+                    "source" in fitted["training_labels"], fitted["training_scope"] == "mixed"
+                )
 
     def test_source_model_can_predict_targets_without_local_training_labels(self):
         series = synthetic_series()
-        q = series["target"].discharge.clone(); q[8:30] = float("nan")
+        q = series["target"].discharge.clone()
+        q[8:30] = float("nan")
         series["target"] = replace(series["target"], discharge=q)
-        config = replace(small_config(), validation_basins=(), selected_models=("mlp_source_target",), observation_budgets=(3,))
+        config = replace(
+            small_config(),
+            validation_basins=(),
+            selected_models=("mlp_source_target",),
+            observation_budgets=(3,),
+        )
         result = run_case_study(config, series_by_basin=series)
         self.assertEqual(result["model_fits"][0]["training_labels"], {"source": 22})
         self.assertIsNone(result["metrics"][0]["calibration_first"])
         self.assertEqual(result["metrics"][0]["days"], 15)
 
     def test_target_only_model_ignores_source_and_held_out_target_labels(self):
-        config = replace(small_config(), source_basins=(), validation_basins=(),
-                         selected_models=("mlp_target_target",), observation_budgets=(3,))
+        config = replace(
+            small_config(),
+            source_basins=(),
+            validation_basins=(),
+            selected_models=("mlp_target_target",),
+            observation_budgets=(3,),
+        )
         series = synthetic_series()
         first = run_case_study(config, series_by_basin=series)
-        q = series["target"].discharge.clone(); q[11:] = q[11:] * 8 + 20
+        q = series["target"].discharge.clone()
+        q[11:] = q[11:] * 8 + 20
         series["target"] = replace(series["target"], discharge=q)
         series["source"] = replace(series["source"], discharge=series["source"].discharge + 200)
         second = run_case_study(config, series_by_basin=series)
         self.assertEqual(first["model_fits"], second["model_fits"])
-        self.assertEqual([r["predicted_mm_day"] for r in first["predictions"]], [r["predicted_mm_day"] for r in second["predictions"]])
+        self.assertEqual(
+            [r["predicted_mm_day"] for r in first["predictions"]],
+            [r["predicted_mm_day"] for r in second["predictions"]],
+        )
         self.assertNotEqual(first["metrics"][0]["rmse_mm_day"], second["metrics"][0]["rmse_mm_day"])
 
 
@@ -251,12 +358,12 @@ class PipelineTests(unittest.TestCase):
 
     def test_known_flux_relation_can_be_approximated_on_unseen_states(self):
         x = torch.rand((180, 3), generator=torch.Generator().manual_seed(23))
-        logits = (2 * x[:, 0] + .5 * x[:, 1] - x[:, 2] - 2)[:, None]
-        config = replace(self.config, kan_steps=100, kan_hidden=2, sparsity_weight=.0001)
+        logits = (2 * x[:, 0] + 0.5 * x[:, 1] - x[:, 2] - 2)[:, None]
+        config = replace(self.config, kan_steps=100, kan_hidden=2, sparsity_weight=0.0001)
         flux, diagnostics = distil_symbolic(x[:120], logits[:120], x[120:], logits[120:], config, 0)
         error = (flux(x[120:]).sigmoid() - logits[120:, 0].sigmoid()).square().mean()
-        self.assertLess(float(error), .003)
-        self.assertLess(diagnostics["candidates"][0]["validation_fraction_mse"], .003)
+        self.assertLess(float(error), 0.003)
+        self.assertLess(diagnostics["candidates"][0]["validation_fraction_mse"], 0.003)
 
     def test_real_pykan_pipeline_records_executed_expression_and_budgets(self):
         result = self.result
@@ -274,20 +381,28 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(row["trainable_parameters"], 0 if row["method"] == "kan_pure" else 3)
             if row["method"] == "kan_tuned":
                 self.assertEqual(row["calibration_first"], "2001-01-09")
-                self.assertEqual(row["calibration_last"], "2001-01-11" if row["budget"] == 3 else "2001-01-14")
+                self.assertEqual(
+                    row["calibration_last"], "2001-01-11" if row["budget"] == 3 else "2001-01-14"
+                )
             else:
                 self.assertIsNone(row["calibration_first"])
 
     def _check_accelerator_pipeline(self, selected):
         seen = set()
+
         def observe(forcing, *args, **kwargs):
             seen.add(forcing.device.type)
             return simulate(forcing, *args, **kwargs)
+
         with patch("complexity_ensemble.kan_case_study.simulate", side_effect=observe):
-            result = run_case_study(replace(self.config, device=selected), series_by_basin=self.series)
+            result = run_case_study(
+                replace(self.config, device=selected), series_by_basin=self.series
+            )
         self.assertEqual(seen, {selected})
         self.assertEqual(result["hardware"]["resolved"], selected)
-        self.assertEqual(result["equations"][0]["kan_fitting_device"], "cuda" if selected == "cuda" else "cpu")
+        self.assertEqual(
+            result["equations"][0]["kan_fitting_device"], "cuda" if selected == "cuda" else "cpu"
+        )
         self.assertTrue(all(math.isfinite(row["rmse_mm_day"]) for row in result["metrics"]))
         json.dumps(result, allow_nan=False)
 
@@ -300,25 +415,34 @@ class PipelineTests(unittest.TestCase):
         self._check_accelerator_pipeline("cuda")
 
     def test_target_budget_override_is_used_by_calibration_and_saved_results(self):
-        config = replace(self.config, observation_budgets=(40,),
-                         target_observation_budgets={"target": (3, 6)})
+        config = replace(
+            self.config, observation_budgets=(40,), target_observation_budgets={"target": (3, 6)}
+        )
         result = run_case_study(config, series_by_basin=self.series)
         self.assertEqual(len(result["metrics"]), 4)
         self.assertEqual({row["budget"] for row in result["metrics"]}, {3, 6})
         self.assertEqual(result["config"]["target_observation_budgets"], {"target": (3, 6)})
 
     def test_all_selected_models_run_and_record_exact_training_cohorts(self):
-        result = run_case_study(replace(self.config, selected_models=COMPARISON_MODELS, observation_budgets=(3,)),
-                                series_by_basin=self.series)
+        result = run_case_study(
+            replace(self.config, selected_models=COMPARISON_MODELS, observation_budgets=(3,)),
+            series_by_basin=self.series,
+        )
         self.assertEqual({r["method"] for r in result["metrics"]}, set(COMPARISON_MODELS))
         self.assertEqual(len(result["metrics"]), 12)
         self.assertEqual(len(result["predictions"]), 12 * 15)
         self.assertEqual(len(result["equations"]), 2)
         standard, complex_equation = result["equations"]
-        self.assertEqual(standard["logit_expression"], self.result["equations"][0]["logit_expression"])
+        self.assertEqual(
+            standard["logit_expression"], self.result["equations"][0]["logit_expression"]
+        )
         for method in ("kan_pure", "kan_tuned"):
-            self.assertEqual(next(r for r in result["metrics"] if r["method"] == method),
-                             next(r for r in self.result["metrics"] if r["method"] == method and r["budget"] == 3))
+            self.assertEqual(
+                next(r for r in result["metrics"] if r["method"] == method),
+                next(
+                    r for r in self.result["metrics"] if r["method"] == method and r["budget"] == 3
+                ),
+            )
         self.assertEqual(complex_equation["models"], ["kan_complex"])
         self.assertEqual(complex_equation["discovery_settings"]["teacher_epochs"], 50)
         self.assertEqual(len(complex_equation["candidates"]), 6)
@@ -327,8 +451,13 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(all(r["calibration_first"] == "2001-01-09" for r in complex_rows))
         self.assertEqual(len(result["model_fits"]), 9)
         for fitted in result["model_fits"]:
-            expected = ({"source": 22} if fitted["training_scope"] == "source" else
-                        {"target": 3} if fitted["training_scope"] == "target" else {"source": 22, "target": 3})
+            expected = (
+                {"source": 22}
+                if fitted["training_scope"] == "source"
+                else {"target": 3}
+                if fitted["training_scope"] == "target"
+                else {"source": 22, "target": 3}
+            )
             self.assertEqual(fitted["training_labels"], expected)
             self.assertNotIn("validation", fitted["training_labels"])
         neural_rows = [r for r in result["metrics"] if not r["method"].startswith("kan_")]
@@ -347,7 +476,9 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result["traces"], self.result["traces"])
         for old, new in zip(self.result["predictions"], result["predictions"]):
             self.assertEqual(old["predicted_mm_day"], new["predicted_mm_day"])
-        self.assertNotEqual(result["metrics"][0]["rmse_mm_day"], self.result["metrics"][0]["rmse_mm_day"])
+        self.assertNotEqual(
+            result["metrics"][0]["rmse_mm_day"], self.result["metrics"][0]["rmse_mm_day"]
+        )
 
     def test_archive_roundtrip(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -382,9 +513,12 @@ class PipelineTests(unittest.TestCase):
         from complexity_ensemble.regional import BasinCatalogRecord, CAMELSCHCatalog
         from complexity_ensemble.server_settings import DatasetRegistration, ServerSettings
         from complexity_ensemble.worker import run_job
+
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            settings = ServerSettings(root / "state", {"ch": DatasetRegistration(root / "data")}, token="secret")
+            settings = ServerSettings(
+                root / "state", {"ch": DatasetRegistration(root / "data")}, token="secret"
+            )
             application = Application(settings)
             catalog = CAMELSCHCatalog(root / "data", [BasinCatalogRecord(b) for b in self.series])
             catalog.load_series = lambda basin, start, end: self.series[basin]
@@ -395,22 +529,32 @@ class PipelineTests(unittest.TestCase):
                 self.assertEqual(client.get("/api/v1/case-studies/kan").status_code, 401)
                 client.headers["Authorization"] = "Bearer secret"
                 payload = {"dataset_id": "ch", "config": asdict(self.config)}
-                self.assertEqual(client.post("/api/v1/case-studies/kan/validate", json=payload).status_code, 200)
+                self.assertEqual(
+                    client.post("/api/v1/case-studies/kan/validate", json=payload).status_code, 200
+                )
                 response = client.post("/api/v1/case-studies/kan", json=payload)
                 self.assertEqual(response.status_code, 202, response.text)
                 store.acquire_worker("test", stale_after=0)
                 job = store.claim("test")
-                with patch("complexity_ensemble.kan_case_study.run_case_study", return_value=copy.deepcopy(self.result)):
+                with patch(
+                    "complexity_ensemble.kan_case_study.run_case_study",
+                    return_value=copy.deepcopy(self.result),
+                ):
                     result = run_job(application, store, job, "test")
                 store.finish(job["id"], "test", result=result)
                 store.release_worker("test")
                 report = client.get(f"/api/v1/jobs/{job['id']}/result")
                 self.assertEqual(report.status_code, 200)
                 self.assertEqual(report.json()["kind"], "kan_case_study")
-                self.assertEqual(client.get(f"/api/v1/case-studies/kan/jobs/{job['id']}/archive").status_code, 200)
+                self.assertEqual(
+                    client.get(f"/api/v1/case-studies/kan/jobs/{job['id']}/archive").status_code,
+                    200,
+                )
                 self.assertEqual(len(client.get("/api/v1/case-studies/kan").json()["items"]), 1)
                 payload["config"]["target_basins"] = ["source"]
-                self.assertEqual(client.post("/api/v1/case-studies/kan", json=payload).status_code, 422)
+                self.assertEqual(
+                    client.post("/api/v1/case-studies/kan", json=payload).status_code, 422
+                )
 
 
 if __name__ == "__main__":

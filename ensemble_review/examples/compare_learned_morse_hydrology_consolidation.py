@@ -53,9 +53,7 @@ def main(
     stem_suffix: str = "",
     result_label: str = "isolated consolidation",
 ) -> None:
-    parser = argparse.ArgumentParser(
-        description=description
-    )
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--source", choices=("camels_ch", "ukraine_csv"), default="camels_ch")
     parser.add_argument("--data-root", type=Path, default=DEFAULT_CAMELS_CH_ROOT)
     parser.add_argument("--csv", type=Path)
@@ -65,11 +63,15 @@ def main(
     parser.add_argument("--without-landcover", action="store_true")
     parser.add_argument("--sequence-length", type=int, default=30)
     parser.add_argument(
-        "--tda-context-length", type=int, default=128,
+        "--tda-context-length",
+        type=int,
+        default=128,
         help="Past observations used by TDA routing (default: 128)",
     )
     parser.add_argument(
-        "--tda-embedding-dim", type=int, default=3,
+        "--tda-embedding-dim",
+        type=int,
+        default=3,
         help="Takens embedding dimension for TDA routing (default: 3)",
     )
     parser.add_argument("--tda-delay", type=int, default=7)
@@ -80,7 +82,9 @@ def main(
         default="total_persistence",
     )
     parser.add_argument(
-        "--lyapunov-context-length", type=int, default=365,
+        "--lyapunov-context-length",
+        type=int,
+        default=365,
         help="Past observations used by Lyapunov routing (default: 365)",
     )
     parser.add_argument("--lyapunov-embedding-dim", type=int, default=3)
@@ -89,11 +93,15 @@ def main(
     parser.add_argument("--lyapunov-fit-horizon", type=int, default=20)
     parser.add_argument("--lyapunov-min-r2", type=float, default=0.8)
     parser.add_argument(
-        "--complexity-percentile", type=float, default=80.0,
+        "--complexity-percentile",
+        type=float,
+        default=80.0,
         help="Training-score percentile used as the complex-route threshold (default: 80)",
     )
     parser.add_argument(
-        "--gate-temperature", type=float, default=0.15,
+        "--gate-temperature",
+        type=float,
+        default=0.15,
         help="Soft routing transition width relative to score IQR (default: 0.15)",
     )
     parser.add_argument("--simple", choices=("rbf", "fourier"), default="rbf")
@@ -112,11 +120,15 @@ def main(
     parser.add_argument("--epochs", type=int, default=20, help="Final ensemble epochs")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument(
-        "--training-noise", type=float, default=0.1,
+        "--training-noise",
+        type=float,
+        default=0.1,
         help="Noise standard deviation for dynamic training inputs (default: 0.1)",
     )
     parser.add_argument(
-        "--inference-noise", type=float, default=0.1,
+        "--inference-noise",
+        type=float,
+        default=0.1,
         help="Noise standard deviation for dynamic inference inputs (default: 0.1)",
     )
     parser.add_argument(
@@ -239,8 +251,7 @@ def main(
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     configuration = {
-        key: str(value) if isinstance(value, Path) else value
-        for key, value in vars(args).items()
+        key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()
     }
     configuration["models"] = list(models)
     with (args.output_dir / f"{stem}_config.json").open("w", encoding="utf-8") as output:

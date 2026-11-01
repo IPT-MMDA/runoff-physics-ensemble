@@ -21,7 +21,9 @@ def resolve_device(requested: str | torch.device = "auto") -> torch.device:
     if device.type == "cuda" and not torch.cuda.is_available():
         raise ValueError("CUDA was requested but is not available")
     if device.type == "mps" and not torch.backends.mps.is_available():
-        raise ValueError("MPS was requested but is not available; use an Apple Silicon Mac with an MPS-enabled PyTorch build, or select cpu")
+        raise ValueError(
+            "MPS was requested but is not available; use an Apple Silicon Mac with an MPS-enabled PyTorch build, or select cpu"
+        )
     return device
 
 
@@ -35,8 +37,13 @@ def randperm(n: int, *, generator: torch.Generator, device: str | torch.device) 
     return torch.randperm(n, generator=generator, device=generator.device).to(device)
 
 
-def randn(shape: tuple[int, ...] | torch.Size, *, generator: torch.Generator,
-          device: str | torch.device, dtype: torch.dtype = torch.float32) -> torch.Tensor:
+def randn(
+    shape: tuple[int, ...] | torch.Size,
+    *,
+    generator: torch.Generator,
+    device: str | torch.device,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
     return torch.randn(shape, generator=generator, device=generator.device, dtype=dtype).to(device)
 
 

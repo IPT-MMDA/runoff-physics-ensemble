@@ -96,9 +96,7 @@ class CAMELSCHChemPressures:
         ]
         missing = [str(item) for item in required if not item.exists()]
         if missing:
-            raise FileNotFoundError(
-                "invalid CAMELS-CH-Chem layout; missing: " + ", ".join(missing)
-            )
+            raise FileNotFoundError("invalid CAMELS-CH-Chem layout; missing: " + ", ".join(missing))
         return path
 
     @staticmethod
@@ -117,9 +115,7 @@ class CAMELSCHChemPressures:
     def _observations(
         self, basin_id: str, selected: Sequence[str]
     ) -> dict[str, tuple[tuple[date, float], ...]]:
-        result: dict[str, list[tuple[date, float]]] = {
-            feature: [] for feature in selected
-        }
+        result: dict[str, list[tuple[date, float]]] = {feature: [] for feature in selected}
         by_group: dict[str, list[tuple[str, str]]] = {}
         for feature in selected:
             group, column = _FEATURE_SOURCES[feature]
@@ -170,9 +166,9 @@ class CAMELSCHChemPressures:
         series_by_basin: Mapping[str, HydrologySeries],
         features: Sequence[str] | None = None,
     ) -> dict[str, HydrologySeries]:
-        selected = tuple(dict.fromkeys(
-            DEFAULT_CAMELS_CH_CHEM_FEATURES if features is None else features
-        ))
+        selected = tuple(
+            dict.fromkeys(DEFAULT_CAMELS_CH_CHEM_FEATURES if features is None else features)
+        )
         unknown = set(selected) - set(CAMELS_CH_CHEM_DYNAMIC_FEATURES)
         if unknown:
             raise ValueError(f"unknown CAMELS-CH-Chem features: {sorted(unknown)}")
@@ -181,9 +177,7 @@ class CAMELSCHChemPressures:
         supported = set(self._gauge_ids)
         result: dict[str, HydrologySeries] = {}
         forcing_names = tuple(
-            item
-            for feature in selected
-            for item in (feature, f"{feature}_available")
+            item for feature in selected for item in (feature, f"{feature}_available")
         )
         for basin_id, series in series_by_basin.items():
             observations = (
@@ -193,9 +187,7 @@ class CAMELSCHChemPressures:
             )
             columns: list[list[float]] = []
             for feature in selected:
-                values, available = self._causal_daily_values(
-                    series.dates, observations[feature]
-                )
+                values, available = self._causal_daily_values(series.dates, observations[feature])
                 columns.extend((values, available))
             external = torch.tensor(columns, dtype=series.forcings.dtype).T
             result[basin_id] = HydrologySeries(

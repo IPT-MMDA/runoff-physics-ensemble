@@ -1,4 +1,5 @@
 """Configuration mapping shared by CLI, application services, and HTTP adapters."""
+
 from __future__ import annotations
 
 from dataclasses import fields
@@ -10,9 +11,16 @@ from .camels_ch_chem import DEFAULT_CAMELS_CH_CHEM_FEATURES
 from .estreams import ESTREAMS_DYNAMIC_FEATURES
 from .hyd_responses import DEFAULT_HYD_RESPONSES_FEATURES
 from .regional import (
-    BasinScopeConfig, DateRange, DateSplitConfig, ExtremeEventConfig, ForecastConfig,
-    HyperparameterConfig, ModelArchitectureConfig, PhysicsModelConfig,
-    RegionalExperimentConfig, TrainingStrategyConfig,
+    BasinScopeConfig,
+    DateRange,
+    DateSplitConfig,
+    ExtremeEventConfig,
+    ForecastConfig,
+    HyperparameterConfig,
+    ModelArchitectureConfig,
+    PhysicsModelConfig,
+    RegionalExperimentConfig,
+    TrainingStrategyConfig,
 )
 
 T = TypeVar("T")
@@ -22,7 +30,11 @@ def _dataclass_values(cls: type[T], value: Mapping[str, object]) -> dict[str, ob
     allowed = {item.name for item in fields(cls)}
     result = {key: item for key, item in value.items() if key in allowed}
     for key in (
-        "mlp_widths", "seeds", "robustness_noise_levels", "event_types", "release_states",
+        "mlp_widths",
+        "seeds",
+        "robustness_noise_levels",
+        "event_types",
+        "release_states",
     ):
         if key in result and isinstance(result[key], list):
             result[key] = tuple(result[key])  # type: ignore[index]
@@ -30,7 +42,9 @@ def _dataclass_values(cls: type[T], value: Mapping[str, object]) -> dict[str, ob
 
 
 def config_from_mapping(
-    value: Mapping[str, object], *, data_root: str | Path | None = None,
+    value: Mapping[str, object],
+    *,
+    data_root: str | Path | None = None,
     estreams_root: str | Path | None = None,
     camels_chem_root: str | Path | None = None,
     hyd_responses_root: str | Path | None = None,
@@ -64,16 +78,16 @@ def config_from_mapping(
         raise ValueError("data_root is required in the config or as --data-root")
     targets = basin_value.get("target_basins", ())
     eligible = basin_value.get("eligible_basins")
-    resolved_estreams = (
-        estreams_root if estreams_root is not None else value.get("estreams_root")
-    )
+    resolved_estreams = estreams_root if estreams_root is not None else value.get("estreams_root")
     estreams_features = value.get("estreams_features", ESTREAMS_DYNAMIC_FEATURES)
     resolved_chem = (
         camels_chem_root if camels_chem_root is not None else value.get("camels_chem_root")
     )
     chem_features = value.get("camels_chem_features", DEFAULT_CAMELS_CH_CHEM_FEATURES)
     state_features = value.get("camels_state_features", ())
-    resolved_hyd = hyd_responses_root if hyd_responses_root is not None else value.get("hyd_responses_root")
+    resolved_hyd = (
+        hyd_responses_root if hyd_responses_root is not None else value.get("hyd_responses_root")
+    )
     hyd_features = value.get("hyd_responses_features", DEFAULT_HYD_RESPONSES_FEATURES)
     if not isinstance(hyd_features, (list, tuple)):
         raise ValueError("hyd_responses_features must be a list of feature names")
@@ -114,8 +128,10 @@ def config_from_mapping(
         hyd_responses_static=hyd_static,
         benchmark=BenchmarkConfig(**_dataclass_values(BenchmarkConfig, section("benchmark"))),
         bafu_root=bafu_root if bafu_root is not None else value.get("bafu_root"),
-        bafu_statistics_zip=bafu_statistics_zip if bafu_statistics_zip is not None else value.get("bafu_statistics_zip"),
-        bafu_return_levels=bafu_return_levels if bafu_return_levels is not None else value.get("bafu_return_levels"),
+        bafu_statistics_zip=bafu_statistics_zip
+        if bafu_statistics_zip is not None
+        else value.get("bafu_statistics_zip"),
+        bafu_return_levels=bafu_return_levels
+        if bafu_return_levels is not None
+        else value.get("bafu_return_levels"),
     )
-
-

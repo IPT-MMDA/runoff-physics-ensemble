@@ -1,4 +1,5 @@
 """Hydropower works through the API without native Gradio or a worker."""
+
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +14,11 @@ from shapely.geometry import Point, box
 from complexity_ensemble.api import create_app
 from complexity_ensemble.application import Application
 from complexity_ensemble.regional import BasinCatalogRecord, CAMELSCHCatalog
-from complexity_ensemble.server_settings import DatasetRegistration, HydropowerSettings, ServerSettings
+from complexity_ensemble.server_settings import (
+    DatasetRegistration,
+    HydropowerSettings,
+    ServerSettings,
+)
 
 
 class HydropowerAPITests(unittest.TestCase):
@@ -22,37 +27,59 @@ class HydropowerAPITests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         self.settings = ServerSettings(
-            self.root / "state", {"ch": DatasetRegistration(self.root / "data")},
-            token="test-token", hydropower=HydropowerSettings(geopackage=self.root / "missing.gpkg"))
+            self.root / "state",
+            {"ch": DatasetRegistration(self.root / "data")},
+            token="test-token",
+            hydropower=HydropowerSettings(geopackage=self.root / "missing.gpkg"),
+        )
         self.application = Application(self.settings)
         self.application.hydropower_sites = gpd.GeoDataFrame(
             {"_site_id": ["inside", "outside"], "_site_name": ["Matched plant", "Outside plant"]},
-            geometry=[Point(1, 1), Point(10, 10)], crs="EPSG:4326")
-        self.catalog = CAMELSCHCatalog(self.root / "data", [BasinCatalogRecord(
-            "basin", "Test basin", {"area": 86.4}, eligible=True, geometry=box(0, 0, 2, 2))])
+            geometry=[Point(1, 1), Point(10, 10)],
+            crs="EPSG:4326",
+        )
+        self.catalog = CAMELSCHCatalog(
+            self.root / "data",
+            [
+                BasinCatalogRecord(
+                    "basin", "Test basin", {"area": 86.4}, eligible=True, geometry=box(0, 0, 2, 2)
+                )
+            ],
+        )
         self.application.catalog = lambda dataset_id: self.catalog
         self.predictions = self.root / "predictions.csv"
         self.predictions.write_text(
             "seed,basin_id,target_date,predicted_mm_day\n"
             "1,basin,2024-01-01,4\n2,basin,2024-01-01,4\n"
-            "1,basin,2024-01-02,7\n2,basin,2024-01-02,9\n")
+            "1,basin,2024-01-02,7\n2,basin,2024-01-02,9\n"
+        )
         self.runs = {
-            "one": SimpleNamespace(run_id="one", created_at="2024-01-03", config={"dataset_id": "ch"}),
-            "legacy": SimpleNamespace(run_id="legacy", created_at="2024-01-02",
-                                      config={"data_root": str(self.root / "data")}),
-            "unregistered": SimpleNamespace(run_id="unregistered", created_at="2024-01-01",
-                                            config={"dataset_id": "missing"}),
+            "one": SimpleNamespace(
+                run_id="one", created_at="2024-01-03", config={"dataset_id": "ch"}
+            ),
+            "legacy": SimpleNamespace(
+                run_id="legacy",
+                created_at="2024-01-02",
+                config={"data_root": str(self.root / "data")},
+            ),
+            "unregistered": SimpleNamespace(
+                run_id="unregistered", created_at="2024-01-01", config={"dataset_id": "missing"}
+            ),
         }
+
         def get(run_id):
             if run_id not in self.runs:
                 raise KeyError("run not found")
             return self.runs[run_id]
+
         for name, replacement in (
-            ("get", get), ("list", lambda: (list(self.runs.values()), [])),
+            ("get", get),
+            ("list", lambda: (list(self.runs.values()), [])),
             ("artifact", lambda run_id, kind: self.predictions),
         ):
             patcher = patch.object(self.application.runs, name, replacement)
-            patcher.start(); self.addCleanup(patcher.stop)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.client = TestClient(create_app(self.settings, application=self.application))
         self.client.headers["Authorization"] = "Bearer test-token"
         self.addCleanup(self.client.close)
@@ -99,8 +126,10 @@ class HydropowerAPITests(unittest.TestCase):
 
     def test_invalid_dates_unknown_runs_and_unregistered_sources(self):
         for run_id, query, status in (
-            ("one", "?target_date=bad", 422), ("one", "?target_date=2025-01-01", 422),
-            ("missing", "", 404), ("unregistered", "", 404),
+            ("one", "?target_date=bad", 422),
+            ("one", "?target_date=2025-01-01", 422),
+            ("missing", "", 404),
+            ("unregistered", "", 404),
         ):
             response = self.client.get(f"/api/v1/runs/{run_id}/hydropower{query}")
             self.assertEqual(response.status_code, status, response.text)
@@ -109,7 +138,9 @@ class HydropowerAPITests(unittest.TestCase):
         settings = replace(self.settings, hydropower=HydropowerSettings(enabled=False))
         with TestClient(create_app(settings, application=self.application)) as client:
             for path in ("/hydropower/sites", "/hydropower/runs", "/runs/one/hydropower"):
-                response = client.get("/api/v1" + path, headers={"Authorization": "Bearer test-token"})
+                response = client.get(
+                    "/api/v1" + path, headers={"Authorization": "Bearer test-token"}
+                )
                 self.assertEqual(response.status_code, 409)
                 self.assertIn("disabled", response.json()["message"])
 
@@ -122,16 +153,23 @@ class HydropowerAPITests(unittest.TestCase):
     def comparison_predictions(self):
         self.predictions.write_text(
             "seed,basin_id,target_date,observed_mm_day,predicted_mm_day\n"
-            "1,basin,2024-01-01,4,5\n1,basin,2024-01-02,8,7\n")
+            "1,basin,2024-01-01,4,5\n1,basin,2024-01-02,8,7\n"
+        )
 
     def test_comparison_returns_shared_errors_economics_and_full_geometry_catalog(self):
         self.comparison_predictions()
-        with patch("complexity_ensemble.application.CAMELSCHCatalog", return_value=self.catalog) as factory:
-            response = self.client.post("/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "legacy"})
+        with patch(
+            "complexity_ensemble.application.CAMELSCHCatalog", return_value=self.catalog
+        ) as factory:
+            response = self.client.post(
+                "/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "legacy"}
+            )
         self.assertEqual(response.status_code, 200, response.text)
         factory.assert_called_once_with(self.root / "data", simplify_geometry=False)
         payload = response.json()
-        self.assertEqual((payload["dataset_id"], payload["basins"], payload["samples"]), ("ch", 1, 2))
+        self.assertEqual(
+            (payload["dataset_id"], payload["basins"], payload["samples"]), ("ch", 1, 2)
+        )
         self.assertEqual(payload["economics"]["cost_index_a"], 100)
         self.assertEqual(payload["economics"]["saving_eur"], 0)
         self.assertEqual(payload["map"]["features"][0]["properties"]["error_a_m3_s"], -1)
@@ -139,12 +177,17 @@ class HydropowerAPITests(unittest.TestCase):
 
     def test_comparison_requires_authentication_and_enabled_feature(self):
         self.client.headers.clear()
-        response = self.client.post("/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "one"})
+        response = self.client.post(
+            "/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "one"}
+        )
         self.assertEqual(response.status_code, 401)
         settings = replace(self.settings, hydropower=HydropowerSettings(enabled=False))
         with TestClient(create_app(settings, application=self.application)) as client:
-            response = client.post("/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "one"},
-                                   headers={"Authorization": "Bearer test-token"})
+            response = client.post(
+                "/api/v1/hydropower/compare",
+                json={"run_a": "one", "run_b": "one"},
+                headers={"Authorization": "Bearer test-token"},
+            )
         self.assertEqual(response.status_code, 409)
 
     def test_comparison_rejects_missing_runs_other_datasets_and_invalid_assumptions(self):
@@ -158,16 +201,22 @@ class HydropowerAPITests(unittest.TestCase):
             response = self.client.post("/api/v1/hydropower/compare", json=body)
             self.assertEqual(response.status_code, status, response.text)
         self.application.dataset_for_run = lambda run_id: run_id
-        response = self.client.post("/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "legacy"})
+        response = self.client.post(
+            "/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "legacy"}
+        )
         self.assertEqual(response.status_code, 422)
         self.assertIn("same registered dataset", response.text)
 
     def test_comparison_requires_observations_and_reports_bad_periods(self):
         with patch("complexity_ensemble.application.CAMELSCHCatalog", return_value=self.catalog):
-            response = self.client.post("/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "one"})
+            response = self.client.post(
+                "/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "one"}
+            )
             self.assertEqual(response.status_code, 422)
             self.assertIn("observed_mm_day", response.text)
             self.comparison_predictions()
-            response = self.client.post("/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "one",
-                "start": "2024-01-02", "end": "2024-01-01"})
+            response = self.client.post(
+                "/api/v1/hydropower/compare",
+                json={"run_a": "one", "run_b": "one", "start": "2024-01-02", "end": "2024-01-01"},
+            )
         self.assertEqual(response.status_code, 422)

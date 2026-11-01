@@ -4,6 +4,7 @@ The station inventory is sourced from the Swiss Federal Office of Energy's
 WASTA GeoPackage. It is downloaded automatically on first use and cached as a
 local GeoPackage so the user does not need to upload a layer in the GUI.
 """
+
 from __future__ import annotations
 
 import math
@@ -46,7 +47,10 @@ def ensure_hydropower_gpkg(path: str | Path, *, timeout: int = 8) -> Path:
             WASTA_GPKG_URL,
             headers={"User-Agent": "complexity-ensemble/0.1 hydropower-data-loader"},
         )
-        with urllib.request.urlopen(request, timeout=timeout) as response, temp_path.open("wb") as out:
+        with (
+            urllib.request.urlopen(request, timeout=timeout) as response,
+            temp_path.open("wb") as out,
+        ):
             while True:
                 chunk = response.read(1024 * 1024)
                 if not chunk:
@@ -71,6 +75,7 @@ def load_hydropower_sites(path: str | Path, *, layer: str | None = None):
     locations when a source also contains auxiliary label layers.
     """
     import geopandas as gpd
+
     source = Path(path)
     if not source.is_file():
         raise FileNotFoundError(source)
@@ -80,20 +85,22 @@ def load_hydropower_sites(path: str | Path, *, layer: str | None = None):
         # Use it to avoid loading potentially large attribute-only and polygon
         # layers just to discover that they cannot render as station points.
         if "geometry_type" in layers.columns:
-            point_layers = layers[layers["geometry_type"].astype(str).str.lower().isin(
-                {"point", "multipoint"}
-            )]
+            point_layers = layers[
+                layers["geometry_type"].astype(str).str.lower().isin({"point", "multipoint"})
+            ]
             layer_names = list(point_layers["name"].astype(str))
         else:
             layer_names = list(layers["name"].astype(str))
     except (AttributeError, ValueError, OSError):
         import fiona
+
         layer_names = list(fiona.listlayers(source))
     if layer is not None:
         if layer not in layer_names:
             # Layer metadata may omit geometry types; verify against all GeoPackage layers.
             try:
                 import fiona
+
                 all_layers = list(fiona.listlayers(source))
             except Exception:
                 all_layers = layer_names
@@ -129,12 +136,18 @@ def load_hydropower_sites(path: str | Path, *, layer: str | None = None):
         frame["_source_layer"] = layer_name
         frames.append(frame)
     if not frames:
-        raise ValueError(f"No point layer with a declared CRS was found in hydropower GeoPackage {source!s}" + (f" for configured layer {layer!r}." if layer else "."))
+        raise ValueError(
+            f"No point layer with a declared CRS was found in hydropower GeoPackage {source!s}"
+            + (f" for configured layer {layer!r}." if layer else ".")
+        )
     # Prefer the explicitly named hydropower plant layer when present. Some
     # GeoPackages contain auxiliary point layers with more label/centroid
     # features than the actual inventory.
-    preferred = [candidate for candidate in frames
-                 if "hydropowerplant" in str(candidate["_source_layer"].iloc[0]).lower()]
+    preferred = [
+        candidate
+        for candidate in frames
+        if "hydropowerplant" in str(candidate["_source_layer"].iloc[0]).lower()
+    ]
     # Avoid relying on pandas in the expression above; source-layer names are
     # constant within each candidate frame.
     frame = (max(preferred, key=len) if preferred else max(frames, key=len)).copy()
@@ -152,8 +165,20 @@ def load_hydropower_sites(path: str | Path, *, layer: str | None = None):
 
 
 def _site_name(row) -> str:
-    candidates = ("name", "anlagenname", "kraftwerk", "werk_name", "name_de", "name_fr",
-                  "name_it", "plant_name", "zentralenname", "anlage", "bezeichnung", "objektname")
+    candidates = (
+        "name",
+        "anlagenname",
+        "kraftwerk",
+        "werk_name",
+        "name_de",
+        "name_fr",
+        "name_it",
+        "plant_name",
+        "zentralenname",
+        "anlage",
+        "bezeichnung",
+        "objektname",
+    )
     columns = {str(key).lower(): key for key in row.index}
     for candidate in candidates:
         key = columns.get(candidate)
@@ -189,7 +214,14 @@ def _capacity_kw(row) -> float | None:
 def _basin_area_km2(record) -> float | None:
     attrs = getattr(record, "static_attributes", {}) or {}
     # CAMELS-CH area attributes are normally in km². Prefer explicit names.
-    preferred = ("area_km2", "area_km²", "area", "area_gages2", "catchment_area", "catchment_area_km2")
+    preferred = (
+        "area_km2",
+        "area_km²",
+        "area",
+        "area_gages2",
+        "catchment_area",
+        "catchment_area_km2",
+    )
     lowered = {str(key).lower(): value for key, value in attrs.items()}
     for key in preferred:
         if key in lowered:
@@ -230,7 +262,6 @@ def _mean_predictions(result) -> dict[tuple[str, date], float]:
     return {key: sum(values) / len(values) for key, values in grouped.items() if values}
 
 
-
 def load_saved_run_predictions(run_path: str | Path):
     """Load persisted predictions.csv into the lightweight shape used by the map.
 
@@ -252,7 +283,9 @@ def load_saved_run_predictions(run_path: str | Path):
         required = {"seed", "basin_id", "target_date", "predicted_mm_day"}
         missing = required - set(reader.fieldnames or ())
         if missing:
-            raise ValueError("Saved predictions.csv is missing columns: " + ", ".join(sorted(missing)))
+            raise ValueError(
+                "Saved predictions.csv is missing columns: " + ", ".join(sorted(missing))
+            )
         for row in reader:
             try:
                 day = date.fromisoformat(str(row["target_date"])[:10])
@@ -262,13 +295,18 @@ def load_saved_run_predictions(run_path: str | Path):
                 continue
             if not math.isfinite(value):
                 continue
-            predictions.append(SimpleNamespace(
-                seed=seed, basin_id=str(row["basin_id"]), target_date=day,
-                predicted_mm_day=value,
-            ))
+            predictions.append(
+                SimpleNamespace(
+                    seed=seed,
+                    basin_id=str(row["basin_id"]),
+                    target_date=day,
+                    predicted_mm_day=value,
+                )
+            )
     if not predictions:
         raise ValueError(f"No valid predictions found in {path}")
     return SimpleNamespace(predictions=predictions, source_path=path)
+
 
 def prepare_hydropower_forecast(result, catalog, sites, target_date: str | date | None = None):
     """Attach basin forecast and day-over-day change to each plant.
@@ -279,6 +317,7 @@ def prepare_hydropower_forecast(result, catalog, sites, target_date: str | date 
     """
     import geopandas as gpd
     import pandas as pd
+
     means = _mean_predictions(result)
     available_dates = sorted({day for _, day in means})
     if not available_dates:
@@ -294,9 +333,15 @@ def prepare_hydropower_forecast(result, catalog, sites, target_date: str | date 
             raise ValueError("Date must use YYYY-MM-DD format.") from error
     if selected_date not in available_dates:
         available = ", ".join(day.isoformat() for day in available_dates[-5:])
-        raise ValueError(f"No predictions for {selected_date.isoformat()}. Latest available dates: {available}")
+        raise ValueError(
+            f"No predictions for {selected_date.isoformat()}. Latest available dates: {available}"
+        )
     yesterday = selected_date - timedelta(days=1)
-    records = [record for record in getattr(catalog, "records", ()) if getattr(record, "geometry", None) is not None]
+    records = [
+        record
+        for record in getattr(catalog, "records", ())
+        if getattr(record, "geometry", None) is not None
+    ]
     # Cache geometry bounds once. The former nested scan called covers() and
     # buffer() for every plant x basin pair, making large inventories slow.
     records_with_bounds = []
@@ -308,7 +353,15 @@ def prepare_hydropower_forecast(result, catalog, sites, target_date: str | date 
             continue
         records_with_bounds.append((record, minx, miny, maxx, maxy))
     out = sites.copy()
-    basin_ids, predicted, previous, deltas, pct_changes, flows, previous_flows = [], [], [], [], [], [], []
+    basin_ids, predicted, previous, deltas, pct_changes, flows, previous_flows = (
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
     statuses = []
     for _, site in out.iterrows():
         point = site.geometry
@@ -319,8 +372,11 @@ def prepare_hydropower_forecast(result, catalog, sites, target_date: str | date 
             px, py = point.x, point.y
             # Cheap bounding-box rejection avoids expensive geometry operations
             # for almost all unrelated catchments.
-            candidate_records = (record for record, minx, miny, maxx, maxy in records_with_bounds
-                                 if minx - 1e-9 <= px <= maxx + 1e-9 and miny - 1e-9 <= py <= maxy + 1e-9)
+            candidate_records = (
+                record
+                for record, minx, miny, maxx, maxy in records_with_bounds
+                if minx - 1e-9 <= px <= maxx + 1e-9 and miny - 1e-9 <= py <= maxy + 1e-9
+            )
         for record in candidate_records:
             geometry = record.geometry
             try:
@@ -333,25 +389,55 @@ def prepare_hydropower_forecast(result, catalog, sites, target_date: str | date 
                 candidates.append(record)
         # Where boundaries overlap, prefer the smallest eligible catchment with
         # a forecast for the selected day; otherwise leave the station unmatched.
-        candidates.sort(key=lambda rec: (0 if (str(rec.basin_id), selected_date) in means else 1,
-                                         getattr(rec.geometry, "area", float("inf"))))
-        match = next((rec for rec in candidates if (str(rec.basin_id), selected_date) in means), None)
+        candidates.sort(
+            key=lambda rec: (
+                0 if (str(rec.basin_id), selected_date) in means else 1,
+                getattr(rec.geometry, "area", float("inf")),
+            )
+        )
+        match = next(
+            (rec for rec in candidates if (str(rec.basin_id), selected_date) in means), None
+        )
         if match is None:
-            basin_ids.append(None); predicted.append(float("nan")); previous.append(float("nan"))
-            deltas.append(float("nan")); pct_changes.append(float("nan")); flows.append(float("nan")); previous_flows.append(float("nan"))
+            basin_ids.append(None)
+            predicted.append(float("nan"))
+            previous.append(float("nan"))
+            deltas.append(float("nan"))
+            pct_changes.append(float("nan"))
+            flows.append(float("nan"))
+            previous_flows.append(float("nan"))
             statuses.append("No matched basin forecast")
             continue
         basin = str(match.basin_id)
         now = means.get((basin, selected_date), float("nan"))
         before = means.get((basin, yesterday), float("nan"))
         delta = now - before if math.isfinite(before) else float("nan")
-        pct = (delta / abs(before) * 100.0) if math.isfinite(delta) and abs(before) > 1e-9 else float("nan")
+        pct = (
+            (delta / abs(before) * 100.0)
+            if math.isfinite(delta) and abs(before) > 1e-9
+            else float("nan")
+        )
         area = _basin_area_km2(match)
         q_now = now * area / 86.4 if area is not None else float("nan")
-        q_before = before * area / 86.4 if area is not None and math.isfinite(before) else float("nan")
-        basin_ids.append(basin); predicted.append(now); previous.append(before); deltas.append(delta)
-        pct_changes.append(pct); flows.append(q_now); previous_flows.append(q_before)
-        statuses.append("Increase" if math.isfinite(pct) and pct > 0 else "Decrease" if math.isfinite(pct) and pct < 0 else "Stable" if math.isfinite(pct) else "Yesterday unavailable")
+        q_before = (
+            before * area / 86.4 if area is not None and math.isfinite(before) else float("nan")
+        )
+        basin_ids.append(basin)
+        predicted.append(now)
+        previous.append(before)
+        deltas.append(delta)
+        pct_changes.append(pct)
+        flows.append(q_now)
+        previous_flows.append(q_before)
+        statuses.append(
+            "Increase"
+            if math.isfinite(pct) and pct > 0
+            else "Decrease"
+            if math.isfinite(pct) and pct < 0
+            else "Stable"
+            if math.isfinite(pct)
+            else "Yesterday unavailable"
+        )
     out["basin_id"] = basin_ids
     out["predicted_mm_day"] = predicted
     out["previous_mm_day"] = previous
@@ -385,7 +471,9 @@ def hydropower_map_payload(sites, *, target_date: str | None = None) -> dict:
             "capacity_kw": _json_number(row.get("_capacity_kw")),
             "status": str(row.get("status", "No forecast")),
         }
-        features.append({"type": "Feature", "geometry": geom.__geo_interface__, "properties": properties})
+        features.append(
+            {"type": "Feature", "geometry": geom.__geo_interface__, "properties": properties}
+        )
     return {"type": "FeatureCollection", "features": features, "target_date": target_date}
 
 
@@ -402,13 +490,17 @@ def hydropower_table_rows(sites) -> list[list[object]]:
     rows = []
     for _, row in sites.iterrows():
         pct = _json_number(row.get("change_pct"))
-        rows.append([
-            str(row.get("_site_name", "Hydropower plant")),
-            str(row.get("basin_id", "") or "—"),
-            _json_number(row.get("predicted_m3_s")),
-            _json_number(row.get("previous_m3_s")),
-            _json_number(row.get("change_pct")),
-            str(row.get("status", "No forecast")),
-        ])
-    rows.sort(key=lambda item: abs(item[4]) if isinstance(item[4], (int, float)) else -1, reverse=True)
+        rows.append(
+            [
+                str(row.get("_site_name", "Hydropower plant")),
+                str(row.get("basin_id", "") or "—"),
+                _json_number(row.get("predicted_m3_s")),
+                _json_number(row.get("previous_m3_s")),
+                _json_number(row.get("change_pct")),
+                str(row.get("status", "No forecast")),
+            ]
+        )
+    rows.sort(
+        key=lambda item: abs(item[4]) if isinstance(item[4], (int, float)) else -1, reverse=True
+    )
     return rows

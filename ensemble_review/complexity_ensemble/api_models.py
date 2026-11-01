@@ -1,4 +1,5 @@
 """Version-one HTTP contracts, derived from the shared configuration defaults."""
+
 from __future__ import annotations
 
 from dataclasses import MISSING, fields
@@ -7,12 +8,27 @@ from typing import Literal, Union, get_args, get_origin, get_type_hints
 from collections.abc import Mapping
 import types
 
-from pydantic import (BaseModel, ConfigDict, Field, StrictBool, StrictFloat,
-                      StrictInt, StrictStr, create_model)
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    create_model,
+)
 
 from .benchmarks import BenchmarkConfig
-from .regional import (BasinScopeConfig, HyperparameterConfig, ModelArchitectureConfig,
-                       TrainingStrategyConfig, PhysicsModelConfig, ExtremeEventConfig, ForecastConfig)
+from .regional import (
+    BasinScopeConfig,
+    HyperparameterConfig,
+    ModelArchitectureConfig,
+    TrainingStrategyConfig,
+    PhysicsModelConfig,
+    ExtremeEventConfig,
+    ForecastConfig,
+)
 from .estreams import ESTREAMS_DYNAMIC_FEATURES
 from .camels_ch_chem import DEFAULT_CAMELS_CH_CHEM_FEATURES
 from .hyd_responses import DEFAULT_HYD_RESPONSES_FEATURES
@@ -51,7 +67,9 @@ def configuration_model(cls):
         elif f.default_factory is not MISSING:
             default = Field(default_factory=f.default_factory)
         definitions[f.name] = (strict_type(hints[f.name]), default)
-    return create_model(cls.__name__.removesuffix("Config") + "Request", __base__=Contract, **definitions)
+    return create_model(
+        cls.__name__.removesuffix("Config") + "Request", __base__=Contract, **definitions
+    )
 
 
 def strict_type(annotation):
@@ -143,9 +161,9 @@ class PavedSiteRequest(Contract):
     proposed_paved_fraction: float = Field(default=0.8, ge=0, le=1)
     pervious_runoff_coefficient: float = Field(default=0.25, ge=0, le=1)
     paved_runoff_coefficient: float = Field(default=0.9, ge=0, le=1)
-    connected_fraction: float = Field(default=1., ge=0, le=1)
-    storage_capacity_mm: float = Field(default=0., ge=0)
-    release_mm_day: float = Field(default=0., ge=0)
+    connected_fraction: float = Field(default=1.0, ge=0, le=1)
+    storage_capacity_mm: float = Field(default=0.0, ge=0)
+    release_mm_day: float = Field(default=0.0, ge=0)
     start_date: date | None = None
 
 

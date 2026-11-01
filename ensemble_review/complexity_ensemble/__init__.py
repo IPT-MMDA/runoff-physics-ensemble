@@ -2,7 +2,8 @@
 
 from .experts import FourierExpert, MLPExpert, RBFExpert, build_expert
 from .camels_ch_chem import (
-    CAMELS_CH_CHEM_DYNAMIC_FEATURES, DEFAULT_CAMELS_CH_CHEM_FEATURES,
+    CAMELS_CH_CHEM_DYNAMIC_FEATURES,
+    DEFAULT_CAMELS_CH_CHEM_FEATURES,
     CAMELSCHChemPressures,
 )
 from .hydrology import (

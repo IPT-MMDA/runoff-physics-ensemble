@@ -1,6 +1,5 @@
 """Short, contextual explanations for the data sources."""
 
-
 _DATASET_HELP = {
     "hyd-responses": (
         "HYD-RESPONSES water states",

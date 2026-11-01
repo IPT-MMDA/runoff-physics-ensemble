@@ -131,8 +131,12 @@ def load_camels_ch(
 ) -> HydrologySeries:
     """Load observed specific discharge and simulation-based meteorological forcing."""
     root = Path(root)
-    observed_path = root / "timeseries" / "observation_based" / f"CAMELS_CH_obs_based_{basin_id}.csv"
-    simulated_path = root / "timeseries" / "simulation_based" / f"CAMELS_CH_sim_based_{basin_id}.csv"
+    observed_path = (
+        root / "timeseries" / "observation_based" / f"CAMELS_CH_obs_based_{basin_id}.csv"
+    )
+    simulated_path = (
+        root / "timeseries" / "simulation_based" / f"CAMELS_CH_sim_based_{basin_id}.csv"
+    )
     if not observed_path.exists() or not simulated_path.exists():
         raise FileNotFoundError(f"CAMELS-CH basin {basin_id} was not found under {root}")
 
@@ -207,8 +211,10 @@ def load_ukraine_csv(
             (_parse_date(row[names["date"]]), discharge, [float(value) for value in values])
         )
     return _series_from_records(
-        records, ("precipitation", "temperature", "pet"),
-        basin_id=basin_id, country="Ukraine",
+        records,
+        ("precipitation", "temperature", "pet"),
+        basin_id=basin_id,
+        country="Ukraine",
     )
 
 
@@ -229,7 +235,9 @@ def make_hydrology_data(
     if train_fraction <= 0 or validation_fraction <= 0 or train_fraction + validation_fraction >= 1:
         raise ValueError("split fractions must be positive and leave a non-empty test fraction")
 
-    day_of_year = torch.tensor([day.timetuple().tm_yday for day in series.dates], dtype=torch.float32)
+    day_of_year = torch.tensor(
+        [day.timetuple().tm_yday for day in series.dates], dtype=torch.float32
+    )
     angle = 2.0 * torch.pi * day_of_year / 365.25
     features = torch.cat(
         (
@@ -252,7 +260,7 @@ def make_hydrology_data(
             for index in range(first, target_index)
         ):
             continue
-        physical_windows.append(features[target_index - sequence_length:target_index])
+        physical_windows.append(features[target_index - sequence_length : target_index])
         routing_windows.append(features[first:target_index])
         targets.append(series.discharge[target_index])
         target_dates.append(series.dates[target_index])
@@ -275,12 +283,21 @@ def make_hydrology_data(
 
     def split(start: int, stop: int) -> HydrologySplit:
         return HydrologySplit(
-            normalized[start:stop], physical[start:stop], target[start:stop] / discharge_scale,
-            tuple(target_dates[start:stop]), normalized_routing[start:stop],
+            normalized[start:stop],
+            physical[start:stop],
+            target[start:stop] / discharge_scale,
+            tuple(target_dates[start:stop]),
+            normalized_routing[start:stop],
         )
 
     return HydrologyData(
-        split(0, train_end), split(train_end, validation_end), split(validation_end, len(target)),
-        tuple(feature_names), feature_mean, feature_scale, discharge_scale,
-        series.basin_id, series.country,
+        split(0, train_end),
+        split(train_end, validation_end),
+        split(validation_end, len(target)),
+        tuple(feature_names),
+        feature_mean,
+        feature_scale,
+        discharge_scale,
+        series.basin_id,
+        series.country,
     )

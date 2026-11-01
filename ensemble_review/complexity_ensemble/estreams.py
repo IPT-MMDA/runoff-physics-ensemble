@@ -35,9 +35,7 @@ class EStreamsVegetationSnow:
     def __init__(self, root: str | Path):
         self.root = Path(root)
         self._paths = self.validate_layout(self.root)
-        self._camels_to_estreams = self._read_camels_crosswalk(
-            self._paths["gauges"]
-        )
+        self._camels_to_estreams = self._read_camels_crosswalk(self._paths["gauges"])
 
     @staticmethod
     def _find_file(root: Path, filename: str) -> Path:
@@ -47,9 +45,7 @@ class EStreamsVegetationSnow:
             if "__MACOSX" not in path.parts and not path.name.startswith("._")
         ]
         if not matches:
-            raise FileNotFoundError(
-                f"invalid EStreams layout under {root}; missing {filename}"
-            )
+            raise FileNotFoundError(f"invalid EStreams layout under {root}; missing {filename}")
         if len(matches) > 1:
             raise ValueError(
                 f"ambiguous EStreams layout under {root}; found multiple {filename} files"
@@ -62,8 +58,7 @@ class EStreamsVegetationSnow:
         if not path.is_dir():
             raise FileNotFoundError(f"EStreams root is not a directory: {path}")
         result = {
-            name: cls._find_file(path, filename)
-            for name, (filename, _) in _MONTHLY_FILES.items()
+            name: cls._find_file(path, filename) for name, (filename, _) in _MONTHLY_FILES.items()
         }
         result["gauges"] = cls._find_file(path, "estreams_gauging_stations.csv")
         return result
@@ -81,9 +76,7 @@ class EStreamsVegetationSnow:
                     continue
                 previous = result.setdefault(gauge_id, basin_id)
                 if previous != basin_id:
-                    raise ValueError(
-                        f"CAMELS-CH gauge {gauge_id} maps to multiple EStreams basins"
-                    )
+                    raise ValueError(f"CAMELS-CH gauge {gauge_id} maps to multiple EStreams basins")
         return result
 
     @property
@@ -94,9 +87,7 @@ class EStreamsVegetationSnow:
     def _read_monthly_columns(
         path: Path, basin_ids: set[str], scale: float
     ) -> dict[str, tuple[tuple[date, float], ...]]:
-        values: dict[str, list[tuple[date, float]]] = {
-            basin_id: [] for basin_id in basin_ids
-        }
+        values: dict[str, list[tuple[date, float]]] = {basin_id: [] for basin_id in basin_ids}
         if not basin_ids:
             return {}
         with path.open(encoding="utf-8-sig", newline="") as source:
@@ -105,9 +96,7 @@ class EStreamsVegetationSnow:
                 header = next(reader)
             except StopIteration as error:
                 raise ValueError(f"empty EStreams file: {path}") from error
-            columns = {
-                index: name for index, name in enumerate(header) if name in basin_ids
-            }
+            columns = {index: name for index, name in enumerate(header) if name in basin_ids}
             missing = basin_ids - set(columns.values())
             if missing:
                 raise ValueError(
@@ -144,13 +133,12 @@ class EStreamsVegetationSnow:
         return result, available
 
     def augment(
-        self, series_by_basin: Mapping[str, HydrologySeries],
+        self,
+        series_by_basin: Mapping[str, HydrologySeries],
         features: Sequence[str] | None = None,
     ) -> dict[str, HydrologySeries]:
         """Return new daily series with LAI, NDVI, snow, and availability masks."""
-        selected = tuple(dict.fromkeys(
-            ESTREAMS_DYNAMIC_FEATURES if features is None else features
-        ))
+        selected = tuple(dict.fromkeys(ESTREAMS_DYNAMIC_FEATURES if features is None else features))
         unknown = set(selected) - set(ESTREAMS_DYNAMIC_FEATURES)
         if unknown:
             raise ValueError(f"unknown EStreams dynamic features: {sorted(unknown)}")
@@ -163,16 +151,10 @@ class EStreamsVegetationSnow:
         }
         requested = set(mapped.values())
         monthly = {
-            name: self._read_monthly_columns(
-                self._paths[name], requested, _MONTHLY_FILES[name][1]
-            )
+            name: self._read_monthly_columns(self._paths[name], requested, _MONTHLY_FILES[name][1])
             for name in selected
         }
-        forcing_names = tuple(
-            item
-            for name in selected
-            for item in (name, f"{name}_available")
-        )
+        forcing_names = tuple(item for name in selected for item in (name, f"{name}_available"))
         result: dict[str, HydrologySeries] = {}
         for gauge_id, series in series_by_basin.items():
             estreams_id = mapped.get(gauge_id)

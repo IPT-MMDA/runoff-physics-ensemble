@@ -22,12 +22,17 @@ class LearnedMorseTests(unittest.TestCase):
         self.assertTrue(any(parameter.grad is not None for parameter in potential.parameters()))
 
         model = RoutedHydrologyModel(
-            names, 7, torch.tensor(1.0), routing="learned_morse",
+            names,
+            7,
+            torch.tensor(1.0),
+            routing="learned_morse",
             learned_morse_potential=potential,
         )
         model.fit_router(inputs)
         self.assertEqual(model(inputs).shape, (12, 1))
-        self.assertTrue(all(not parameter.requires_grad for parameter in model.router.potential.parameters()))
+        self.assertTrue(
+            all(not parameter.requires_grad for parameter in model.router.potential.parameters())
+        )
 
     def test_learned_morse_requires_calibration(self) -> None:
         names = ("precipitation", "temperature", "pet", "previous_discharge")

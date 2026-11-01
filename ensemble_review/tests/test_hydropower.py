@@ -12,25 +12,40 @@ from complexity_ensemble.hydropower import (
     load_saved_run_predictions,
     prepare_hydropower_forecast,
 )
-from complexity_ensemble.regional import BasinCatalogRecord, CAMELSCHCatalog, PredictionRecord, ExperimentResult
+from complexity_ensemble.regional import (
+    BasinCatalogRecord,
+    CAMELSCHCatalog,
+    PredictionRecord,
+    ExperimentResult,
+)
 
 
 def _result():
     rows = []
     for seed in (1, 2):
-        rows.extend([
-            PredictionRecord(seed, "basin-1", date(2024, 1, 1), 4.0, 4.0, 0.5),
-            PredictionRecord(seed, "basin-1", date(2024, 1, 2), 7.0, 8.0, 0.5),
-        ])
+        rows.extend(
+            [
+                PredictionRecord(seed, "basin-1", date(2024, 1, 1), 4.0, 4.0, 0.5),
+                PredictionRecord(seed, "basin-1", date(2024, 1, 2), 7.0, 8.0, 0.5),
+            ]
+        )
     return ExperimentResult(rows, {}, {}, {}, {}, [], [], {})
 
 
 def test_hydropower_map_uses_ensemble_mean_and_day_over_day_percent():
-    catalog = CAMELSCHCatalog(".", [BasinCatalogRecord(
-        "basin-1", "Test basin", {"area": 86.4}, eligible=True, geometry=box(0, 0, 2, 2)
-    )])
-    sites = gpd.GeoDataFrame({"_site_id": ["p1"], "_site_name": ["Test plant"], "_capacity_kw": [1200]},
-                              geometry=[Point(1, 1)], crs="EPSG:4326")
+    catalog = CAMELSCHCatalog(
+        ".",
+        [
+            BasinCatalogRecord(
+                "basin-1", "Test basin", {"area": 86.4}, eligible=True, geometry=box(0, 0, 2, 2)
+            )
+        ],
+    )
+    sites = gpd.GeoDataFrame(
+        {"_site_id": ["p1"], "_site_name": ["Test plant"], "_capacity_kw": [1200]},
+        geometry=[Point(1, 1)],
+        crs="EPSG:4326",
+    )
 
     forecast, target_date = prepare_hydropower_forecast(_result(), catalog, sites, "2024-01-02")
 
@@ -47,11 +62,19 @@ def test_hydropower_map_uses_ensemble_mean_and_day_over_day_percent():
 
 
 def test_hydropower_stations_without_spatial_match_are_not_given_fake_forecast():
-    catalog = CAMELSCHCatalog(".", [BasinCatalogRecord(
-        "basin-1", "Test basin", {"area": 10}, eligible=True, geometry=box(0, 0, 1, 1)
-    )])
-    sites = gpd.GeoDataFrame({"_site_id": ["p1"], "_site_name": ["Outside plant"]},
-                              geometry=[Point(10, 10)], crs="EPSG:4326")
+    catalog = CAMELSCHCatalog(
+        ".",
+        [
+            BasinCatalogRecord(
+                "basin-1", "Test basin", {"area": 10}, eligible=True, geometry=box(0, 0, 1, 1)
+            )
+        ],
+    )
+    sites = gpd.GeoDataFrame(
+        {"_site_id": ["p1"], "_site_name": ["Outside plant"]},
+        geometry=[Point(10, 10)],
+        crs="EPSG:4326",
+    )
     forecast, _ = prepare_hydropower_forecast(_result(), catalog, sites, "2024-01-02")
     assert forecast.loc[0, "basin_id"] is None
     assert forecast.loc[0, "status"] == "No matched basin forecast"
@@ -59,11 +82,19 @@ def test_hydropower_stations_without_spatial_match_are_not_given_fake_forecast()
 
 
 def test_hydropower_date_must_exist_in_current_run():
-    catalog = CAMELSCHCatalog(".", [BasinCatalogRecord(
-        "basin-1", "Test basin", {"area": 10}, eligible=True, geometry=box(0, 0, 1, 1)
-    )])
-    sites = gpd.GeoDataFrame({"_site_id": ["p1"], "_site_name": ["Test plant"]},
-                              geometry=[Point(.5, .5)], crs="EPSG:4326")
+    catalog = CAMELSCHCatalog(
+        ".",
+        [
+            BasinCatalogRecord(
+                "basin-1", "Test basin", {"area": 10}, eligible=True, geometry=box(0, 0, 1, 1)
+            )
+        ],
+    )
+    sites = gpd.GeoDataFrame(
+        {"_site_id": ["p1"], "_site_name": ["Test plant"]},
+        geometry=[Point(0.5, 0.5)],
+        crs="EPSG:4326",
+    )
     with pytest.raises(ValueError, match="No predictions"):
         prepare_hydropower_forecast(_result(), catalog, sites, "2024-02-01")
 
@@ -78,8 +109,11 @@ def test_hydropower_geopackage_loader_normalizes_points(tmp_path):
     from complexity_ensemble.hydropower import load_hydropower_sites
 
     source = tmp_path / "stations.gpkg"
-    frame = gpd.GeoDataFrame({"ANLAGENNAME": ["Testwerk"], "LEISTUNG_MW": [2.5]},
-                             geometry=[Point(2600000, 1200000)], crs="EPSG:2056")
+    frame = gpd.GeoDataFrame(
+        {"ANLAGENNAME": ["Testwerk"], "LEISTUNG_MW": [2.5]},
+        geometry=[Point(2600000, 1200000)],
+        crs="EPSG:2056",
+    )
     frame.to_file(source, layer="stations", driver="GPKG")
     loaded = load_hydropower_sites(source)
     assert len(loaded) == 1
@@ -114,7 +148,9 @@ def test_hydropower_loader_skips_nonspatial_attribute_tables(tmp_path, monkeypat
     spatial = gpd.GeoDataFrame(
         {"name": ["Valid plant"]}, geometry=[Point(7.4, 46.9)], crs="EPSG:4326"
     )
-    monkeypatch.setattr(gpd, "list_layers", lambda _: pd.DataFrame({"name": ["metadata", "stations"]}))
+    monkeypatch.setattr(
+        gpd, "list_layers", lambda _: pd.DataFrame({"name": ["metadata", "stations"]})
+    )
     original_read_file = gpd.read_file
 
     def fake_read_file(path, layer=None, **kwargs):
@@ -135,9 +171,9 @@ def test_hydropower_loader_explodes_multipoint_to_renderable_points(tmp_path):
     from complexity_ensemble.hydropower import load_hydropower_sites
 
     source = tmp_path / "multipoint.gpkg"
-    frame = gpd.GeoDataFrame({"name": ["Two plants"]},
-                             geometry=[MultiPoint([(7.4, 46.9), (7.5, 47.0)])],
-                             crs="EPSG:4326")
+    frame = gpd.GeoDataFrame(
+        {"name": ["Two plants"]}, geometry=[MultiPoint([(7.4, 46.9), (7.5, 47.0)])], crs="EPSG:4326"
+    )
     frame.to_file(source, layer="stations", driver="GPKG")
     loaded = load_hydropower_sites(source)
     assert len(loaded) == 2
@@ -154,9 +190,9 @@ def test_hydropower_loader_can_select_explicit_layer(tmp_path):
     gpd.GeoDataFrame({"name": ["Auxiliary"]}, geometry=[Point(7.4, 46.9)], crs="EPSG:4326").to_file(
         source, layer="auxiliary_points", driver="GPKG"
     )
-    gpd.GeoDataFrame({"name": ["Configured plant"]}, geometry=[Point(7.5, 47.0)], crs="EPSG:4326").to_file(
-        source, layer="custom_station_layer", driver="GPKG", mode="a"
-    )
+    gpd.GeoDataFrame(
+        {"name": ["Configured plant"]}, geometry=[Point(7.5, 47.0)], crs="EPSG:4326"
+    ).to_file(source, layer="custom_station_layer", driver="GPKG", mode="a")
     loaded = load_hydropower_sites(source, layer="custom_station_layer")
     assert len(loaded) == 1
     assert loaded.loc[0, "_site_name"] == "Configured plant"

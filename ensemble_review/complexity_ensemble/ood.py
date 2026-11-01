@@ -52,9 +52,11 @@ class MahalanobisOODDetector:
         covariance = centered.T @ centered / denominator
         diagonal = torch.diag(torch.diagonal(covariance).clamp_min(1e-6))
         covariance = (1.0 - self.shrinkage) * covariance + self.shrinkage * diagonal
-        covariance = covariance + torch.eye(
-            covariance.shape[0], dtype=covariance.dtype, device=covariance.device
-        ) * 1e-6
+        covariance = (
+            covariance
+            + torch.eye(covariance.shape[0], dtype=covariance.dtype, device=covariance.device)
+            * 1e-6
+        )
         self.precision = torch.linalg.pinv(covariance)
         training_scores = self._score_features(values)
         self.threshold = torch.quantile(training_scores, self.quantile)

@@ -1,6 +1,5 @@
 """Contextual help for experiment configuration controls."""
 
-
 _CONFIG_HELP = {
     "complexity_method": (
         "Complexity routing method",
@@ -49,7 +48,6 @@ _CONFIG_HELP = {
         "effective precipitation and previous discharge. Its residual contributes "
         "to the physics loss during training.",
     ),
-
 }
 
 

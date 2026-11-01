@@ -1,4 +1,5 @@
 """Queue contracts also runnable using the standard-library unittest runner."""
+
 import concurrent.futures
 from pathlib import Path
 import tempfile
@@ -28,6 +29,7 @@ class JobStoreTests(unittest.TestCase):
     def test_concurrent_duplicate_submissions_create_one_job(self):
         def submit(_):
             return JobStore(self.path).submit("experiment", {"seed": 1}, "same")["id"]
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             ids = list(pool.map(submit, range(12)))
         self.assertEqual(len(set(ids)), 1)
@@ -72,18 +74,22 @@ class JobStoreTests(unittest.TestCase):
             self.store.claim("other")
         with self.assertRaises(QueueConflict):
             self.store.finish(job["id"], "other")
-        self.store.progress(job["id"], "owner", .5, "Training")
+        self.store.progress(job["id"], "owner", 0.5, "Training")
         output = self.store.finish(job["id"], "owner", {"run_id": "run"})
         self.assertEqual(output["status"], "succeeded")
-        self.assertEqual(output["progress"], 1.)
+        self.assertEqual(output["progress"], 1.0)
         self.assertEqual(self.store.cancel(job["id"])["status"], "succeeded")
 
     def test_failure_does_not_hide_output(self):
         job = self.store.submit("experiment", {})
         self.store.acquire_worker("owner")
         self.store.claim("owner")
-        output = self.store.finish(job["id"], "owner", {"run_id": "failed-run"},
-                                   {"code": "training_failed", "message": "No usable predictions"})
+        output = self.store.finish(
+            job["id"],
+            "owner",
+            {"run_id": "failed-run"},
+            {"code": "training_failed", "message": "No usable predictions"},
+        )
         self.assertEqual(output["status"], "failed")
         self.assertEqual(output["result"]["run_id"], "failed-run")
 
@@ -100,10 +106,12 @@ class JobStoreTests(unittest.TestCase):
 class SettingsAndSerializationTests(unittest.TestCase):
     def test_settings_paths_are_relative_to_settings_file(self):
         import json
+
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "server.json"
-            path.write_text(json.dumps({"datasets": {"ch": {"data_root": "data"}},
-                                        "storage_dir": "state"}))
+            path.write_text(
+                json.dumps({"datasets": {"ch": {"data_root": "data"}}, "storage_dir": "state"})
+            )
             settings = ServerSettings.load(path, token="secret")
             self.assertEqual(settings.datasets["ch"].data_root, (Path(folder) / "data").resolve())
             self.assertEqual(settings.storage_dir, (Path(folder) / "state").resolve())
@@ -111,8 +119,11 @@ class SettingsAndSerializationTests(unittest.TestCase):
 
     def test_json_safe_converts_nonfinite_numbers_and_dates(self):
         from datetime import date
-        self.assertEqual(json_safe({"a": float("nan"), "b": [float("inf"), date(2020, 1, 1)]}),
-                         {"a": None, "b": [None, "2020-01-01"]})
+
+        self.assertEqual(
+            json_safe({"a": float("nan"), "b": [float("inf"), date(2020, 1, 1)]}),
+            {"a": None, "b": [None, "2020-01-01"]},
+        )
 
 
 if __name__ == "__main__":

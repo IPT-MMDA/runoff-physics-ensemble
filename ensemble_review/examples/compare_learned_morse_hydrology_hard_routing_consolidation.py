@@ -15,9 +15,7 @@ if __name__ == "__main__":
             "Compare selectable hydrology routing models with hard expert-data "
             "assignment and isolated boundary consolidation"
         ),
-        default_output_dir=Path(
-            "artifacts/hydrology/learned_morse_hard_routing_consolidation"
-        ),
+        default_output_dir=Path("artifacts/hydrology/learned_morse_hard_routing_consolidation"),
         stem_suffix="_hard_routing",
         result_label="hard-routing consolidation",
     )

@@ -96,5 +96,7 @@ def build_expert(kind: str, input_dim: int, output_dim: int, **kwargs: object) -
     try:
         expert_type = expert_types[kind.lower()]
     except KeyError as error:
-        raise ValueError(f"unknown expert kind {kind!r}; choose from {sorted(expert_types)}") from error
+        raise ValueError(
+            f"unknown expert kind {kind!r}; choose from {sorted(expert_types)}"
+        ) from error
     return expert_type(input_dim=input_dim, output_dim=output_dim, **kwargs)

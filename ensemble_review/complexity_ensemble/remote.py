@@ -1,4 +1,5 @@
 """Optional HTTP executor used by the existing synchronous CLI and Gradio flows."""
+
 from __future__ import annotations
 
 from datetime import date
@@ -64,13 +65,17 @@ class RemoteExecutor:
     def run(self, config, progress=None, cancellation=None):
         from .regional import ExperimentResult
         from .services import _prediction
-        request = {"dataset_id": self.dataset_id, "config": public_config(config),
-                   "use_estreams": config.estreams_root is not None,
-                   "use_camels_chem": config.camels_chem_root is not None,
-                   "use_hyd_responses": config.hyd_responses_root is not None}
+
+        request = {
+            "dataset_id": self.dataset_id,
+            "config": public_config(config),
+            "use_estreams": config.estreams_root is not None,
+            "use_camels_chem": config.camels_chem_root is not None,
+            "use_hyd_responses": config.hyd_responses_root is not None,
+        }
         job = self.request("POST", "/experiments", request, key=uuid.uuid4().hex)
         if progress:
-            progress(0., f"Submitted remote job {job['job_id']}")
+            progress(0.0, f"Submitted remote job {job['job_id']}")
         try:
             job = self.wait(job, progress, cancellation)
         except KeyboardInterrupt:
@@ -78,43 +83,71 @@ class RemoteExecutor:
             raise
         if not job["result"]:
             resolved = public_config(config) | {
-                "data_root": str(config.data_root), "dataset_id": self.dataset_id,
-                "effective_training_basins": [], "feature_names": [], "static_feature_names": [],
+                "data_root": str(config.data_root),
+                "dataset_id": self.dataset_id,
+                "effective_training_basins": [],
+                "feature_names": [],
+                "static_feature_names": [],
             }
             return ExperimentResult([], {}, {}, {}, {}, [], [], resolved, cancelled=True)
         run_id = job["result"]["run_id"]
         run = self.request("GET", f"/runs/{run_id}")
         rows, offset = [], 0
         while True:
-            page = self.request("GET", f"/runs/{run_id}/predictions?" + urlencode({"offset": offset, "limit": 10000}))
+            page = self.request(
+                "GET",
+                f"/runs/{run_id}/predictions?" + urlencode({"offset": offset, "limit": 10000}),
+            )
             rows.extend(_prediction(row) for row in page["items"])
             offset += len(page["items"])
             if offset >= page["total"]:
                 break
             if not page["items"]:
                 raise RuntimeError("Remote predictions pagination made no progress")
-        resolved = run["config"] | {"data_root": str(config.data_root),
-                                     "api_run_id": run_id, "dataset_id": self.dataset_id,
-                                     "requested_config": run.get("requested_config")}
-        return ExperimentResult(rows, run["aggregate_metrics"], run["per_basin_metrics"],
-                                run["routing_diagnostics"], run["loss_traces"], run["extreme_events"],
-                                run["failures"], resolved, run["parameter_count"], run["runtime_seconds"],
-                                run["cancelled"], forecast_metrics=run["forecast_metrics"],
-                                drought_details=run.get("drought_details", {}))
+        resolved = run["config"] | {
+            "data_root": str(config.data_root),
+            "api_run_id": run_id,
+            "dataset_id": self.dataset_id,
+            "requested_config": run.get("requested_config"),
+        }
+        return ExperimentResult(
+            rows,
+            run["aggregate_metrics"],
+            run["per_basin_metrics"],
+            run["routing_diagnostics"],
+            run["loss_traces"],
+            run["extreme_events"],
+            run["failures"],
+            resolved,
+            run["parameter_count"],
+            run["runtime_seconds"],
+            run["cancelled"],
+            forecast_metrics=run["forecast_metrics"],
+            drought_details=run.get("drought_details", {}),
+        )
 
     def episodes(self, result, basin, event_days, limit):
         run_id = result.resolved_config["api_run_id"]
-        response = self.request("GET", f"/runs/{run_id}/replay/episodes?" +
-                                urlencode({"basin_id": basin, "event_days": event_days, "limit": limit}))
+        response = self.request(
+            "GET",
+            f"/runs/{run_id}/replay/episodes?"
+            + urlencode({"basin_id": basin, "event_days": event_days, "limit": limit}),
+        )
         return [(row["label"], row["episode"]) for row in response["items"]]
 
     def replay(self, result, basin, episode, event_days):
         from .rainfall_replay import Replay
+
         run_id = result.resolved_config["api_run_id"]
-        response = self.request("POST", f"/runs/{run_id}/replay", {
-            "basin_id": basin, "episode": str(episode), "event_days": event_days})["data"]
+        response = self.request(
+            "POST",
+            f"/runs/{run_id}/replay",
+            {"basin_id": basin, "episode": str(episode), "event_days": event_days},
+        )["data"]
         response["dates"] = tuple(date.fromisoformat(day) for day in response["dates"])
-        response["issue_dates"] = tuple(date.fromisoformat(day) if day else None for day in response["issue_dates"])
+        response["issue_dates"] = tuple(
+            date.fromisoformat(day) if day else None for day in response["issue_dates"]
+        )
         for key, value in response.items():
             if isinstance(value, list):
                 response[key] = tuple(value)
@@ -123,9 +156,16 @@ class RemoteExecutor:
     def scenario(self, result, basin, setup):
         from .paved_scenario import PavedScenarioResult
         from .serialization import json_safe
+
         run_id = result.resolved_config["api_run_id"]
-        job = self.wait(self.request("POST", f"/runs/{run_id}/scenarios", {
-            "basin_id": basin, "site": json_safe(setup)}, key=uuid.uuid4().hex))
+        job = self.wait(
+            self.request(
+                "POST",
+                f"/runs/{run_id}/scenarios",
+                {"basin_id": basin, "site": json_safe(setup)},
+                key=uuid.uuid4().hex,
+            )
+        )
         if job["status"] != "succeeded":
             raise RuntimeError("Scenario execution was cancelled")
         response = self.request("GET", f"/jobs/{job['job_id']}/result")

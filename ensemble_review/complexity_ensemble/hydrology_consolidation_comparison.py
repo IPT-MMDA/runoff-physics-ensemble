@@ -105,8 +105,7 @@ def train_hydrology_model_with_consolidation(
             epoch_total += float(losses.total.detach()) * len(indices)
         if verbose:
             print(
-                f"  training epoch {epoch + 1}/{epochs}: "
-                f"loss={epoch_total / len(inputs):.6f}",
+                f"  training epoch {epoch + 1}/{epochs}: loss={epoch_total / len(inputs):.6f}",
                 flush=True,
             )
 

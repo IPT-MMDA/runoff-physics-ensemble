@@ -132,10 +132,7 @@ def _bootstrap_mean_ci(
         value = values[0] if values else math.nan
         return value, value
     generator = random.Random(seed)
-    estimates = [
-        mean(generator.choice(values) for _ in values)
-        for _ in range(draws)
-    ]
+    estimates = [mean(generator.choice(values) for _ in values) for _ in range(draws)]
     return _percentile(estimates, 0.025), _percentile(estimates, 0.975)
 
 
@@ -218,7 +215,10 @@ def plot_basin_heatmap(paired: list[dict[str, object]], path: Path) -> None:
     basins = sorted({str(row["basin"]) for row in paired})
     metrics = (METRICS[0], METRICS[3])
     figure, axes = plt.subplots(
-        len(labels), len(metrics), figsize=(14, 2.2 + 0.5 * len(basins)), squeeze=False,
+        len(labels),
+        len(metrics),
+        figsize=(14, 2.2 + 0.5 * len(basins)),
+        squeeze=False,
         constrained_layout=True,
     )
     for label_index, label in enumerate(labels):
@@ -313,14 +313,13 @@ def write_report(
     for row in sorted(final, key=lambda item: str(item["label"])):
         kge_drift = float(row["drift_mean_test_kge"])
         kge_word = "improves" if kge_drift < 0.0 else "degrades"
-        lines.append(
-            f"- **{row['label']}:** mean KGE {kge_word} by {abs(kge_drift):.3f}."
-        )
+        lines.append(f"- **{row['label']}:** mean KGE {kge_word} by {abs(kge_drift):.3f}.")
 
     lines.extend(["", "## Most noise-sensitive basins", ""])
     for label in sorted({str(row["label"]) for row in paired}):
         rows = [
-            row for row in paired
+            row
+            for row in paired
             if row["label"] == label and float(row["inference_noise"]) == max_noise
         ]
         rows.sort(key=lambda row: float(row["drift_test_nse"]), reverse=True)

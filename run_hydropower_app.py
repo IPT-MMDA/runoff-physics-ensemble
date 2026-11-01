@@ -1,4 +1,5 @@
 """Launch this checkout's Gradio app, avoiding a stale globally installed copy."""
+
 from __future__ import annotations
 
 import sys

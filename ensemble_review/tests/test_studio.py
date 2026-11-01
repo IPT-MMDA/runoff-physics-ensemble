@@ -1,4 +1,5 @@
 """Custom workspace hosting, authentication and HTTP job integration."""
+
 from pathlib import Path
 import tempfile
 import unittest
@@ -23,8 +24,9 @@ class StudioTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
-        self.settings = ServerSettings(root / "state", {"ch": DatasetRegistration(root / "data")},
-                                       token="studio-secret")
+        self.settings = ServerSettings(
+            root / "state", {"ch": DatasetRegistration(root / "data")}, token="studio-secret"
+        )
         application = Application(self.settings)
         self.application = application
         catalog = CAMELSCHCatalog(root / "data", [BasinCatalogRecord("4009")])
@@ -75,11 +77,19 @@ class StudioTests(unittest.TestCase):
 
     def test_library_cards_exclude_heavy_result_arrays_and_server_paths(self):
         self.client.headers["Authorization"] = "Bearer studio-secret"
-        run = SimpleNamespace(run_id="run-one", created_at="2026-10-17T12:00:00Z",
-                              config={"data_root": str(self.settings.datasets["ch"].data_root),
-                                      "dataset_id": "ch", "strategy": {"approach": "soft_routing"}},
-                              aggregate_metrics={"rmse": 1.2}, parameter_count=123,
-                              runtime_seconds=4.2, cancelled=False)
+        run = SimpleNamespace(
+            run_id="run-one",
+            created_at="2026-10-17T12:00:00Z",
+            config={
+                "data_root": str(self.settings.datasets["ch"].data_root),
+                "dataset_id": "ch",
+                "strategy": {"approach": "soft_routing"},
+            },
+            aggregate_metrics={"rmse": 1.2},
+            parameter_count=123,
+            runtime_seconds=4.2,
+            cancelled=False,
+        )
         with patch.object(self.application.runs, "list", return_value=([run], [])):
             page = self.client.get("/api/v1/ui/runs").json()
         self.assertEqual(page["total"], 1)

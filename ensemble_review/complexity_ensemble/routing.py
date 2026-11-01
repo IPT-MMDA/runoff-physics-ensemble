@@ -141,9 +141,13 @@ class ScoreRouter(nn.Module):
         if features.ndim == 1:
             return features, torch.ones_like(features)
         if features.ndim != 2 or features.shape[1] not in (1, 2):
-            raise ValueError("score routing features must have shape [batch], [batch, 1], or [batch, 2]")
+            raise ValueError(
+                "score routing features must have shape [batch], [batch, 1], or [batch, 2]"
+            )
         score = features[:, 0]
-        confidence = features[:, 1].clamp(0.0, 1.0) if features.shape[1] == 2 else torch.ones_like(score)
+        confidence = (
+            features[:, 1].clamp(0.0, 1.0) if features.shape[1] == 2 else torch.ones_like(score)
+        )
         return score, confidence
 
     def complexity(self, features: torch.Tensor) -> torch.Tensor:

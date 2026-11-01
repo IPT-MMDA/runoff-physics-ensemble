@@ -43,16 +43,17 @@ class SelectiveSSM(nn.Module):
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         a = -torch.exp(self.A_log.float())
         delta_bc = self.deltaBC_layer(inputs)
-        delta, b, c = torch.split(
-            delta_bc, [self.dt_rank, self.d_state, self.d_state], dim=-1
-        )
+        delta, b, c = torch.split(delta_bc, [self.dt_rank, self.d_state, self.d_state], dim=-1)
         delta = F.softplus(self.dt_proj_layer(delta))
         delta_a = torch.exp(delta.unsqueeze(-1) * a)
         bx = delta.unsqueeze(-1) * b.unsqueeze(2) * inputs.unsqueeze(-1)
 
         state = torch.zeros(
-            inputs.shape[0], self.dim_inner, self.d_state,
-            device=inputs.device, dtype=inputs.dtype,
+            inputs.shape[0],
+            self.dim_inner,
+            self.d_state,
+            device=inputs.device,
+            dtype=inputs.dtype,
         )
         states = []
         for index in range(inputs.shape[1]):
@@ -135,8 +136,7 @@ class PINNMamba(nn.Module):
         expected_features = self.linear_emb.in_features
         if coordinates.ndim != 3 or coordinates.shape[-1] != expected_features:
             raise ValueError(
-                "PINNMamba expects coordinates shaped "
-                f"[batch, sequence, {expected_features}]"
+                f"PINNMamba expects coordinates shaped [batch, sequence, {expected_features}]"
             )
         encoded = self.encoder(self.linear_emb(coordinates))
         return self.linear_out(encoded)
@@ -196,7 +196,9 @@ class PINNMambaExpert(nn.Module):
         return self.forward_sequence(tx)[:, 0]
 
 
-def make_time_subsequences(coordinates: torch.Tensor, length: int = 7, step: float = 0.01) -> torch.Tensor:
+def make_time_subsequences(
+    coordinates: torch.Tensor, length: int = 7, step: float = 0.01
+) -> torch.Tensor:
     """Expand point coordinates ``(x,t)`` into forward time subsequences."""
     if coordinates.ndim != 2 or coordinates.shape[-1] != 2:
         raise ValueError("coordinates must have shape [n_points, 2]")
@@ -322,8 +324,12 @@ def evaluate_reaction_pinnmamba(
 ) -> PINNMambaEvaluation:
     parameter = next(model.parameters())
     grid = make_reaction_grid(
-        n_space, n_time, sequence_length=7, sequence_step=sequence_step,
-        device=parameter.device, dtype=parameter.dtype,
+        n_space,
+        n_time,
+        sequence_length=7,
+        sequence_step=sequence_step,
+        device=parameter.device,
+        dtype=parameter.dtype,
     )
     model.eval()
     with torch.no_grad():
@@ -332,7 +338,9 @@ def evaluate_reaction_pinnmamba(
         difference = prediction - reference
         absolute = difference.abs()
         relative_mae = absolute.sum() / reference.abs().sum().clamp_min(1e-12)
-        relative_rmse = torch.sqrt(difference.square().sum() / reference.square().sum().clamp_min(1e-12))
+        relative_rmse = torch.sqrt(
+            difference.square().sum() / reference.square().sum().clamp_min(1e-12)
+        )
     shape = (n_time, n_space)
     x = grid.coordinates[:, 0].reshape(shape)
     t = grid.coordinates[:, 1].reshape(shape)

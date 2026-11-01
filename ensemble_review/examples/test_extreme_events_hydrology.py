@@ -45,6 +45,7 @@ from complexity_ensemble.hydrology_data import (
 
 DEFAULT_CAMELS_CH_ROOT = Path("/mnt/c/Users/micro/Downloads/camels_ch/camels_ch")
 
+
 @dataclass(frozen=True)
 class ExtremeEventRecord:
     country: str
@@ -142,11 +143,13 @@ def evaluate_extremes(
     observed_events = _events(observed, dates)
     predicted_events = _events(predicted, dates)
     detected_observed = [
-        event for event in observed_events
+        event
+        for event in observed_events
         if any(_overlaps(event, candidate) for candidate in predicted_events)
     ]
     detected_predicted = [
-        event for event in predicted_events
+        event
+        for event in predicted_events
         if any(_overlaps(event, candidate) for candidate in observed_events)
     ]
 
@@ -197,7 +200,7 @@ def _model_prediction(
     device: torch.device,
 ) -> torch.Tensor:
     model.eval()
-    return (model(split.inputs.to(device)).squeeze(-1).cpu() * discharge_scale.cpu())
+    return model(split.inputs.to(device)).squeeze(-1).cpu() * discharge_scale.cpu()
 
 
 def _persistence_prediction(data: HydrologyData, split: HydrologySplit) -> torch.Tensor:
@@ -389,7 +392,9 @@ def main() -> None:
         json.dump(configuration, output, indent=2, sort_keys=True)
         output.write("\n")
 
-    print(f"Training-only Q{100 * args.quantile:g} threshold: {records[0].threshold_mm_day:.3f} mm/day")
+    print(
+        f"Training-only Q{100 * args.quantile:g} threshold: {records[0].threshold_mm_day:.3f} mm/day"
+    )
     print("model            seed  AP     recall  CSI    event recall  extreme RMSE")
     for record in records:
         values = (

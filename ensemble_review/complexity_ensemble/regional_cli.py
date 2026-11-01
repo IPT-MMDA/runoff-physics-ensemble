@@ -19,23 +19,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True, help="Regional experiment JSON")
     parser.add_argument("--data-root", type=Path, help="Override data_root from the JSON file")
-    parser.add_argument("--device", choices=DEVICE_CHOICES, help="Override the configured training device")
-    parser.add_argument("--hyd-responses-root", type=Path,
-                        help="Override HYD-RESPONSES extracted dataset directory")
     parser.add_argument(
-        "--estreams-root", type=Path,
+        "--device", choices=DEVICE_CHOICES, help="Override the configured training device"
+    )
+    parser.add_argument(
+        "--hyd-responses-root", type=Path, help="Override HYD-RESPONSES extracted dataset directory"
+    )
+    parser.add_argument(
+        "--estreams-root",
+        type=Path,
         help="Read EStreams vegetation and snow from this extracted dataset directory",
     )
     parser.add_argument(
-        "--camels-chem-root", type=Path,
+        "--camels-chem-root",
+        type=Path,
         help="Read CAMELS-CH-Chem pressures from this extracted dataset directory",
     )
     parser.add_argument(
-        "--save-results", type=parse_bool, default=False, metavar="true|false",
+        "--save-results",
+        type=parse_bool,
+        default=False,
+        metavar="true|false",
         help="Persist the completed run in the shared leaderboard registry (default: false)",
     )
     parser.add_argument(
-        "--results-dir", type=Path, default=DEFAULT_RESULTS_DIRECTORY,
+        "--results-dir",
+        type=Path,
+        default=DEFAULT_RESULTS_DIRECTORY,
         help="Shared run-registry directory",
     )
     parser.add_argument("--api-url", help="Submit execution to an API worker")
@@ -51,18 +61,23 @@ def main() -> None:
         if not args.dataset_id:
             parser.error("--dataset-id is required with --api-url")
         from .remote import RemoteExecutor
+
         executor = RemoteExecutor(args.api_url, args.dataset_id, os.environ.get("RUNOFF_API_TOKEN"))
     try:
         raw = json.loads(args.config.read_text(encoding="utf-8"))
         if not isinstance(raw, Mapping):
             raise ValueError("the top-level configuration must be a JSON object")
         config = config_from_mapping(
-            raw, data_root=args.data_root, estreams_root=args.estreams_root,
+            raw,
+            data_root=args.data_root,
+            estreams_root=args.estreams_root,
             camels_chem_root=args.camels_chem_root,
             hyd_responses_root=args.hyd_responses_root,
         )
         if args.device is not None:
-            config = replace(config, hyperparameters=replace(config.hyperparameters, device=args.device))
+            config = replace(
+                config, hyperparameters=replace(config.hyperparameters, device=args.device)
+            )
         result = execute_experiment(
             config,
             lambda fraction, message: print(f"[{fraction:6.1%}] {message}", flush=True),
@@ -80,6 +95,7 @@ def main() -> None:
         "cancelled": result.cancelled,
     }
     from .serialization import json_safe
+
     print(json.dumps(json_safe(summary), indent=2, allow_nan=False))
     if args.save_results and not result.cancelled:
         saved = save_run(result, args.results_dir)

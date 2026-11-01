@@ -1,4 +1,5 @@
 """Server application context; registered datasets are resolved only here."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,6 +27,7 @@ class Application:
 
     def case_study_config(self, payload):
         from .kan_case_study import config_from_dict
+
         config = config_from_dict(payload["config"])
         resolve_device(config.device)
         eligible = set(self.catalog(payload["dataset_id"]).eligible_ids)
@@ -41,13 +43,18 @@ class Application:
             if payload.get("use_" + kind) and getattr(registration, kind + "_root") is None:
                 raise ValueError(f"optional {kind} dataset is not configured")
         config = config_from_mapping(
-            cfg, data_root=registration.data_root,
+            cfg,
+            data_root=registration.data_root,
             bafu_root=registration.bafu_root,
             bafu_statistics_zip=registration.bafu_statistics_zip,
             bafu_return_levels=registration.bafu_return_levels,
             estreams_root=registration.estreams_root if payload.get("use_estreams") else None,
-            camels_chem_root=registration.camels_chem_root if payload.get("use_camels_chem") else None,
-            hyd_responses_root=registration.hyd_responses_root if payload.get("use_hyd_responses") else None,
+            camels_chem_root=registration.camels_chem_root
+            if payload.get("use_camels_chem")
+            else None,
+            hyd_responses_root=registration.hyd_responses_root
+            if payload.get("use_hyd_responses")
+            else None,
         )
         config.validate()
         resolve_device(config.hyperparameters.device)
@@ -59,20 +66,39 @@ class Application:
             if config.benchmark.mode != "none":
                 from dataclasses import replace
                 from .bafu import basin_compatibility
+
                 compatibility = basin_compatibility(catalog, registration.bafu_root)
-                eligible = {basin for basin, modes in compatibility.items()
-                            if modes[config.benchmark.mode]['eligible']}
+                eligible = {
+                    basin
+                    for basin, modes in compatibility.items()
+                    if modes[config.benchmark.mode]["eligible"]
+                }
                 invalid = set(config.basins.target_basins) - eligible
                 if invalid:
-                    raise ValueError('Incompatible BAFU target stations: ' + '; '.join(
-                        basin + ': ' + ', '.join(compatibility.get(basin, {}).get(
-                            config.benchmark.mode, {}).get('reasons', ['Unknown station']))
-                        for basin in sorted(invalid)))
+                    raise ValueError(
+                        "Incompatible BAFU target stations: "
+                        + "; ".join(
+                            basin
+                            + ": "
+                            + ", ".join(
+                                compatibility.get(basin, {})
+                                .get(config.benchmark.mode, {})
+                                .get("reasons", ["Unknown station"])
+                            )
+                            for basin in sorted(invalid)
+                        )
+                    )
                 if config.basins.eligible_basins is None:
-                    config = replace(config, basins=replace(config.basins, eligible_basins=tuple(sorted(eligible))))
+                    config = replace(
+                        config,
+                        basins=replace(config.basins, eligible_basins=tuple(sorted(eligible))),
+                    )
             if set(config.basins.target_basins) - eligible:
                 raise ValueError("target basins must be eligible basins in this dataset")
-            if config.basins.eligible_basins is not None and set(config.basins.eligible_basins) - eligible:
+            if (
+                config.basins.eligible_basins is not None
+                and set(config.basins.eligible_basins) - eligible
+            ):
                 raise ValueError("eligible_basins contains unavailable basins")
             for kind in ("estreams", "camels_chem", "hyd_responses"):
                 if payload.get("use_" + kind):
@@ -98,7 +124,12 @@ class Application:
     @cached_property
     def hydropower_sites(self):
         """Load the inventory on demand; unrelated workflows need no map data."""
-        from .hydropower import default_hydropower_path, ensure_hydropower_gpkg, load_hydropower_sites
+        from .hydropower import (
+            default_hydropower_path,
+            ensure_hydropower_gpkg,
+            load_hydropower_sites,
+        )
+
         if not self.settings.hydropower.enabled:
             raise ValueError("Hydropower monitoring is disabled in server settings.")
         path = self.settings.hydropower.geopackage or default_hydropower_path()
@@ -107,19 +138,33 @@ class Application:
         return load_hydropower_sites(path, layer=self.settings.hydropower.layer)
 
     def hydropower_forecast(self, run_id, target_date=None):
-        from .hydropower import load_saved_run_predictions, prepare_hydropower_forecast, hydropower_map_payload
+        from .hydropower import (
+            load_saved_run_predictions,
+            prepare_hydropower_forecast,
+            hydropower_map_payload,
+        )
+
         dataset_id = self.dataset_for_run(run_id)
         predictions = load_saved_run_predictions(self.runs.artifact(run_id, "predictions"))
         sites, day = prepare_hydropower_forecast(
-            predictions, self.catalog(dataset_id), self.hydropower_sites, target_date)
+            predictions, self.catalog(dataset_id), self.hydropower_sites, target_date
+        )
         payload = hydropower_map_payload(sites, target_date=day.isoformat())
-        return {"run_id": run_id, "dataset_id": dataset_id, "map": payload,
-                "available_dates": sorted({row.target_date.isoformat() for row in predictions.predictions}),
-                "matched": int(sites["basin_id"].notna().sum()),
-                "with_change": int(sites["change_pct"].notna().sum()), "total": len(sites)}
+        return {
+            "run_id": run_id,
+            "dataset_id": dataset_id,
+            "map": payload,
+            "available_dates": sorted(
+                {row.target_date.isoformat() for row in predictions.predictions}
+            ),
+            "matched": int(sites["basin_id"].notna().sum()),
+            "with_change": int(sites["change_pct"].notna().sum()),
+            "total": len(sites),
+        }
 
     def hydropower_comparison(self, payload):
         from .hydropower_comparison import EnergyScenario, compare_hydropower
+
         dataset_id = self.dataset_for_run(payload.run_a)
         if self.dataset_for_run(payload.run_b) != dataset_id:
             raise ValueError("Hydropower comparison requires runs from the same registered dataset")
@@ -130,36 +175,72 @@ class Application:
             self.hydropower_sites,
             config_a=self.runs.get(payload.run_a).config,
             config_b=self.runs.get(payload.run_b).config,
-            start=payload.start, end=payload.end, target_date=payload.target_date,
-            lead_day=payload.lead_day, scenario=EnergyScenario(**payload.scenario.model_dump()),
+            start=payload.start,
+            end=payload.end,
+            target_date=payload.target_date,
+            lead_day=payload.lead_day,
+            scenario=EnergyScenario(**payload.scenario.model_dump()),
         )
         from .result_registry import run_display_name
-        return {**result, "dataset_id": dataset_id, "run_a": payload.run_a, "run_b": payload.run_b,
-                "run_a_name": run_display_name(self.runs.get(payload.run_a).config),
-                "run_b_name": run_display_name(self.runs.get(payload.run_b).config)}
 
-    def hydropower_training_cohort(self, dataset_id, mode='none'):
+        return {
+            **result,
+            "dataset_id": dataset_id,
+            "run_a": payload.run_a,
+            "run_b": payload.run_b,
+            "run_a_name": run_display_name(self.runs.get(payload.run_a).config),
+            "run_b_name": run_display_name(self.runs.get(payload.run_b).config),
+        }
+
+    def hydropower_training_cohort(self, dataset_id, mode="none"):
         from .bafu import basin_compatibility
         from .hydropower_cohort import hydropower_training_cohort
+
         registration = self.registration(dataset_id)
         catalog = CAMELSCHCatalog(registration.data_root, simplify_geometry=False)
-        return hydropower_training_cohort(catalog, self.hydropower_sites, mode=mode,
-            compatibility=basin_compatibility(catalog, registration.bafu_root))
+        return hydropower_training_cohort(
+            catalog,
+            self.hydropower_sites,
+            mode=mode,
+            compatibility=basin_compatibility(catalog, registration.bafu_root),
+        )
 
     def evaluate_hanze(self, dataset_id, predictions, config):
         root = self.registration(dataset_id).hanze_root
         if root is None:
-            return {"status": "not_configured", "message": "HANZE is not configured for this dataset."}
-        if config.get("benchmark", {}).get("mode", "none") == "none" or config.get("extremes", {}).get("mode") != "statistical":
-            return {"status": "not_applicable", "message": "HANZE evaluation applies to BAFU high-flow runs."}
+            return {
+                "status": "not_configured",
+                "message": "HANZE is not configured for this dataset.",
+            }
+        if (
+            config.get("benchmark", {}).get("mode", "none") == "none"
+            or config.get("extremes", {}).get("mode") != "statistical"
+        ):
+            return {
+                "status": "not_applicable",
+                "message": "HANZE evaluation applies to BAFU high-flow runs.",
+            }
         from .hanze import evaluate_run
+
         return evaluate_run(root, predictions, config, self.catalog(dataset_id))
 
     def hanze_for_run(self, run_id):
         run = self.runs.get(run_id)
         from .hanze import VERSION
-        if run.hanze_details and (run.hanze_details.get("status") != "available" or run.hanze_details.get("verification") == VERSION):
+
+        if run.hanze_details and (
+            run.hanze_details.get("status") != "available"
+            or run.hanze_details.get("verification") == VERSION
+        ):
             return run.hanze_details
-        if run.config.get("benchmark", {}).get("mode", "none") == "none" or run.config.get("extremes", {}).get("mode") != "statistical":
-            return {"status": "not_applicable", "message": "HANZE evaluation applies to BAFU high-flow runs."}
-        return self.evaluate_hanze(self.dataset_for_run(run_id), self.runs.predictions(run_id), run.config)
+        if (
+            run.config.get("benchmark", {}).get("mode", "none") == "none"
+            or run.config.get("extremes", {}).get("mode") != "statistical"
+        ):
+            return {
+                "status": "not_applicable",
+                "message": "HANZE evaluation applies to BAFU high-flow runs.",
+            }
+        return self.evaluate_hanze(
+            self.dataset_for_run(run_id), self.runs.predictions(run_id), run.config
+        )

@@ -1,4 +1,5 @@
 """Dedicated, single-host worker for experiments, scenarios, and GIF exports."""
+
 from __future__ import annotations
 
 import argparse
@@ -39,19 +40,27 @@ def run_job(application, store, job, owner):
     from .rainfall_replay import export_gif
     from .serialization import json_safe, public_config
     from .services import execute_experiment, evaluate_scenario, prepare_replay
+
     token = JobCancellation(store, job["id"])
     payload = job["payload"]
     progress = lambda fraction, message: store.progress(job["id"], owner, fraction, message)
     if token.cancelled:
         return None
     if job["kind"] not in {"experiment", "kan_case_study", "scenario", "gif"}:
-        raise ValueError(f"Unsupported job kind {job['kind']!r}; update and restart the training worker")
+        raise ValueError(
+            f"Unsupported job kind {job['kind']!r}; update and restart the training worker"
+        )
     if job["kind"] == "kan_case_study":
         from .kan_case_study import run_case_study, save_case_study, StudyCancelled
+
         config = application.case_study_config(payload)
         try:
-            result = run_case_study(config, catalog=application.catalog(payload["dataset_id"]),
-                                    progress=progress, cancellation_token=token)
+            result = run_case_study(
+                config,
+                catalog=application.catalog(payload["dataset_id"]),
+                progress=progress,
+                cancellation_token=token,
+            )
         except StudyCancelled:
             return None
         if token.cancelled:
@@ -59,8 +68,11 @@ def run_job(application, store, job, owner):
         result["dataset_id"] = payload["dataset_id"]
         folder = application.settings.storage_dir / "job-results" / job["id"]
         save_case_study(result, folder)
-        return {"artifact": "kan_case_study", "metric_rows": len(result["metrics"]),
-                "local_parameter_count": result["local_parameter_count"]}
+        return {
+            "artifact": "kan_case_study",
+            "metric_rows": len(result["metrics"]),
+            "local_parameter_count": result["local_parameter_count"],
+        }
     if job["kind"] == "experiment":
         config = application.experiment_config(payload)
         result = execute_experiment(config, progress, token)
@@ -71,25 +83,38 @@ def run_job(application, store, job, owner):
             result.resolved_config["basin_selection_audit"] = audit
             result.resolved_config.setdefault("skipped_basins", {}).update(audit["excluded_basins"])
             if result.resolved_config.get("benchmark_manifest"):
-                result.resolved_config["benchmark_manifest"]["excluded_basins"].update(audit["excluded_basins"])
+                result.resolved_config["benchmark_manifest"]["excluded_basins"].update(
+                    audit["excluded_basins"]
+                )
         if application.registration(payload["dataset_id"]).hanze_root is not None:
             progress(0.99, "Evaluating documented HANZE flood events")
             # Catalogue failures must not discard successfully trained discharge results.
             try:
-                result.hanze_details = application.evaluate_hanze(payload["dataset_id"], result.predictions, result.resolved_config)
+                result.hanze_details = application.evaluate_hanze(
+                    payload["dataset_id"], result.predictions, result.resolved_config
+                )
             except Exception:
                 log.exception("HANZE evaluation failed")
-                result.hanze_details = {"status": "error", "message": "HANZE evaluation failed; inspect worker logs and dataset files."}
-                result.failures.append("HANZE evaluation unavailable; discharge and threshold-based scores were preserved.")
+                result.hanze_details = {
+                    "status": "error",
+                    "message": "HANZE evaluation failed; inspect worker logs and dataset files.",
+                }
+                result.failures.append(
+                    "HANZE evaluation unavailable; discharge and threshold-based scores were preserved."
+                )
         # Persist partial output for inspection; cancelled runs are never promoted.
         if token.cancelled:
             result.cancelled = True
         saved = application.runs.save(result, promote=False)
         if payload.get("save_to_leaderboard") and not token.cancelled and not result.cancelled:
             application.runs.promote(saved.run_id)
-        return {"run_id": saved.run_id, "partial": result.cancelled,
-                "warnings": result.failures, "has_failures": bool(result.failures),
-                "execution_failed": not result.predictions and not result.cancelled}
+        return {
+            "run_id": saved.run_id,
+            "partial": result.cancelled,
+            "warnings": result.failures,
+            "has_failures": bool(result.failures),
+            "execution_failed": not result.predictions and not result.cancelled,
+        }
     run_id = payload.get("run_id")
     if not isinstance(run_id, str) or not run_id:
         raise ValueError(f"{job['kind']} jobs require an existing run_id")
@@ -100,6 +125,7 @@ def run_job(application, store, job, owner):
         site = dict(request["site"])
         if site.get("start_date"):
             from datetime import date
+
             site["start_date"] = date.fromisoformat(site["start_date"])
         output = evaluate_scenario(result, catalog, request["basin_id"], PavedSiteConfig(**site))
         folder = application.settings.storage_dir / "job-results" / job["id"]
@@ -108,12 +134,18 @@ def run_job(application, store, job, owner):
         return {"artifact": "scenario", "run_id": run_id, "summary": json_safe(output.summary)}
     if job["kind"] == "gif":
         request = payload["request"]
-        replay = prepare_replay(result, catalog, request["basin_id"], request["episode"],
-                                event_days=request["event_days"])
+        replay = prepare_replay(
+            result,
+            catalog,
+            request["basin_id"],
+            request["episode"],
+            event_days=request["event_days"],
+        )
         temporary = export_gif(replay)
         folder = application.settings.storage_dir / "job-results" / job["id"]
         folder.mkdir(parents=True, exist_ok=True)
         import shutil
+
         try:
             shutil.copyfile(temporary, folder / "replay.gif")
         finally:
@@ -124,6 +156,7 @@ def run_job(application, store, job, owner):
 
 def serve(settings, *, once=False):
     from .application import Application
+
     store = JobStore(settings.jobs_path)
     application = Application(settings)
     owner = uuid.uuid4().hex
@@ -163,13 +196,25 @@ def serve(settings, *, once=False):
                 current[0] = job["id"]
                 try:
                     result = run_job(application, store, job, owner)
-                    error = ({"code": "training_failed", "message": "Experiment produced no usable predictions"}
-                             if result and result.get("execution_failed") else None)
+                    error = (
+                        {
+                            "code": "training_failed",
+                            "message": "Experiment produced no usable predictions",
+                        }
+                        if result and result.get("execution_failed")
+                        else None
+                    )
                     store.finish(job["id"], owner, result=result, error=error)
                 except Exception:
                     log.exception("Job %s failed", job["id"])
-                    store.finish(job["id"], owner, error={
-                        "code": "execution_failed", "message": "Execution failed; inspect server logs"})
+                    store.finish(
+                        job["id"],
+                        owner,
+                        error={
+                            "code": "execution_failed",
+                            "message": "Execution failed; inspect server logs",
+                        },
+                    )
                 finally:
                     current[0] = None
                 if once:

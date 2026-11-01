@@ -1,4 +1,5 @@
 """JSON-safe domain serialization, independent of any presentation framework."""
+
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
@@ -25,5 +26,17 @@ def json_safe(value):
 
 
 def public_config(config):
-    return {k: v for k, v in json_safe(config).items()
-            if k not in {"data_root", "estreams_root", "camels_chem_root", "hyd_responses_root", "bafu_root", "bafu_statistics_zip", "bafu_return_levels"}}
+    return {
+        k: v
+        for k, v in json_safe(config).items()
+        if k
+        not in {
+            "data_root",
+            "estreams_root",
+            "camels_chem_root",
+            "hyd_responses_root",
+            "bafu_root",
+            "bafu_statistics_zip",
+            "bafu_return_levels",
+        }
+    }

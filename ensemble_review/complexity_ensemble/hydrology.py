@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from functools import partial
-import math
-from typing import Sequence
+from typing import Any, Sequence
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 from .experts import MLPExpert, build_expert
+from .hydrology_complexity import SCORE_ROUTING_METHODS, HydrologyComplexityEstimator
 from .pinnmamba import PINNMamba
-from .hydrology_complexity import HydrologyComplexityEstimator, SCORE_ROUTING_METHODS
 from .routing import LearnedRouter, MorseRouter, ScoreRouter
 
 
@@ -88,7 +88,8 @@ class HydrologyPINNMambaExpert(nn.Module):
         super().__init__()
         self.static_embedding = (
             nn.Sequential(nn.Linear(static_dim, static_embedding_dim), nn.Tanh())
-            if static_dim else None
+            if static_dim
+            else None
         )
         self.model = PINNMamba(
             in_dim=feature_count + (static_embedding_dim if static_dim else 0),
@@ -99,7 +100,9 @@ class HydrologyPINNMambaExpert(nn.Module):
             heads=heads,
         )
 
-    def forward(self, inputs: torch.Tensor, static_inputs: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self, inputs: torch.Tensor, static_inputs: torch.Tensor | None = None
+    ) -> torch.Tensor:
         if self.static_embedding is not None:
             if static_inputs is None:
                 raise ValueError("static_inputs are required by this regional expert")
@@ -113,7 +116,9 @@ class HydrologyPINNMambaExpert(nn.Module):
 class LearnedHydrologyMorsePotential(nn.Module):
     """Small scalar potential learned before the final ensemble is trained."""
 
-    def __init__(self, sequence_length: int, feature_names: Sequence[str], hidden_dim: int = 24) -> None:
+    def __init__(
+        self, sequence_length: int, feature_names: Sequence[str], hidden_dim: int = 24
+    ) -> None:
         super().__init__()
         if sequence_length < 2 or hidden_dim < 1:
             raise ValueError("sequence_length must be at least two and hidden_dim must be positive")
@@ -157,7 +162,9 @@ class LearnedHydrologyMorsePotential(nn.Module):
                 differentiable = flat_inputs.detach().clone().requires_grad_(True)
             potential = self(differentiable)
             gradient = torch.autograd.grad(
-                potential.sum(), differentiable, create_graph=create_graph,
+                potential.sum(),
+                differentiable,
+                create_graph=create_graph,
                 retain_graph=create_graph,
             )[0]
         return gradient
@@ -194,7 +201,9 @@ class _FlattenedExpert(nn.Module):
         self.expert = expert
         self.static_dim = static_dim
 
-    def forward(self, inputs: torch.Tensor, static_inputs: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self, inputs: torch.Tensor, static_inputs: torch.Tensor | None = None
+    ) -> torch.Tensor:
         flattened = inputs.flatten(start_dim=1)
         if self.static_dim:
             if static_inputs is None:
@@ -208,17 +217,22 @@ class HydrologyLSTMExpert(nn.Module):
 
     This is a reference LSTM, not a claim to reproduce a published model.
     """
+
     def __init__(self, feature_count, *, hidden_dim=64, num_layers=1, static_dim=0):
         super().__init__()
         self.static_dim = static_dim
-        self.sequence = nn.LSTM(feature_count + static_dim, hidden_dim, num_layers, batch_first=True)
+        self.sequence = nn.LSTM(
+            feature_count + static_dim, hidden_dim, num_layers, batch_first=True
+        )
         self.head = nn.Linear(hidden_dim, 1)
 
     def forward(self, inputs, static_inputs=None):
         if self.static_dim:
             if static_inputs is None:
                 raise ValueError("static_inputs are required")
-            inputs = torch.cat((inputs, static_inputs[:, None, :].expand(-1, inputs.shape[1], -1)), -1)
+            inputs = torch.cat(
+                (inputs, static_inputs[:, None, :].expand(-1, inputs.shape[1], -1)), -1
+            )
         output, _ = self.sequence(inputs)
         return self.head(output[:, -1])
 
@@ -227,7 +241,7 @@ def build_hydrology_complex_expert(
     kind: str,
     sequence_length: int,
     feature_count: int,
-    kwargs: dict[str, object] | None = None,
+    kwargs: dict[str, Any] | None = None,
     static_dim: int = 0,
 ) -> nn.Module:
     kwargs = dict(kwargs or {})
@@ -244,11 +258,15 @@ def build_hydrology_complex_expert(
 
 
 class _HydrologyModelBase(nn.Module):
+    discharge_scale: torch.Tensor
+
     def __init__(self, discharge_scale: float | torch.Tensor, feature_names: Sequence[str]) -> None:
         super().__init__()
         self.feature_names = tuple(feature_names)
         self.physics_available = {"precipitation", "pet"}.issubset(feature_names)
-        self.register_buffer("discharge_scale", torch.as_tensor(discharge_scale).reshape(()).float())
+        self.register_buffer(
+            "discharge_scale", torch.as_tensor(discharge_scale).reshape(()).float()
+        )
         self.raw_response = nn.Parameter(torch.tensor(0.0))
         self.raw_recession = nn.Parameter(torch.tensor(-2.0))
 
@@ -258,7 +276,9 @@ class _HydrologyModelBase(nn.Module):
     def reservoir_parameters(self) -> tuple[torch.Tensor, torch.Tensor]:
         return 2.0 * torch.sigmoid(self.raw_response), torch.sigmoid(self.raw_recession)
 
-    def physics_residual(self, prediction: torch.Tensor, physical_inputs: torch.Tensor) -> torch.Tensor:
+    def physics_residual(
+        self, prediction: torch.Tensor, physical_inputs: torch.Tensor
+    ) -> torch.Tensor:
         if not self.physics_available:
             return prediction.squeeze(-1) * 0
         precipitation = physical_inputs[:, -1, self.feature_names.index("precipitation")]
@@ -285,8 +305,8 @@ class RoutedHydrologyModel(_HydrologyModelBase):
         routing: str = "morse",
         complexity_percentile: float = 80.0,
         gate_temperature: float = 0.15,
-        simple_kwargs: dict[str, object] | None = None,
-        complex_kwargs: dict[str, object] | None = None,
+        simple_kwargs: dict[str, Any] | None = None,
+        complex_kwargs: dict[str, Any] | None = None,
         learned_morse_potential: LearnedHydrologyMorsePotential | None = None,
         static_dim: int = 0,
         complexity_estimator: HydrologyComplexityEstimator | None = None,
@@ -310,15 +330,14 @@ class RoutedHydrologyModel(_HydrologyModelBase):
         self.complex_expert = build_hydrology_complex_expert(
             complex_kind, sequence_length, feature_count, complex_kwargs, static_dim
         )
+        self.router: MorseRouter | LearnedRouter | ScoreRouter
         if routing == "morse":
             gradient = partial(
                 hydrology_morse_gradient,
                 sequence_length=sequence_length,
                 feature_names=self.feature_names,
             )
-            self.router: MorseRouter | LearnedRouter = MorseRouter(
-                gradient, complexity_percentile, gate_temperature
-            )
+            self.router = MorseRouter(gradient, complexity_percentile, gate_temperature)
         elif routing == "learned":
             self.router = LearnedRouter(
                 flat_dim, target_complex_fraction=1.0 - complexity_percentile / 100.0
@@ -337,7 +356,9 @@ class RoutedHydrologyModel(_HydrologyModelBase):
         elif routing in SCORE_ROUTING_METHODS:
             self.router = ScoreRouter(complexity_percentile, gate_temperature)
         else:
-            choices = ", ".join(("morse", "learned_morse", "learned", *sorted(SCORE_ROUTING_METHODS)))
+            choices = ", ".join(
+                ("morse", "learned_morse", "learned", *sorted(SCORE_ROUTING_METHODS))
+            )
             raise ValueError(f"routing must be one of: {choices}")
         self.simple_kind = simple_kind
         self.complex_kind = complex_kind
@@ -396,20 +417,27 @@ class RoutedHydrologyModel(_HydrologyModelBase):
         static_inputs: torch.Tensor | None = None,
     ) -> HydrologyLosses:
         routed = self(
-            inputs, routing_features=routing_features, return_details=True,
+            inputs,
+            routing_features=routing_features,
+            return_details=True,
             static_inputs=static_inputs,
         )
         assert isinstance(routed, HydrologyRoutedOutput)
         data = (routed.discharge.squeeze(-1) - targets).square().mean()
         physics = self.physics_residual(routed.discharge, physical_inputs).square().mean()
         transition = 4.0 * routed.complex_weight * (1.0 - routed.complex_weight)
-        interface = (transition * (routed.simple_raw - routed.complex_raw).square().squeeze(-1)).mean()
+        interface = (
+            transition * (routed.simple_raw - routed.complex_raw).square().squeeze(-1)
+        ).mean()
         router_features = self._router_features(inputs, routing_features)
         routing = self.router.regularization(router_features)
         complex_usage = routed.complex_weight.mean()
         total = (
-            data + physics_weight * physics + interface_weight * interface
-            + routing_weight * routing + compute_weight * complex_usage
+            data
+            + physics_weight * physics
+            + interface_weight * interface
+            + routing_weight * routing
+            + compute_weight * complex_usage
         )
         return HydrologyLosses(total, data, physics, interface, routing, complex_usage)
 
@@ -424,7 +452,7 @@ class SingleComplexHydrologyModel(_HydrologyModelBase):
         discharge_scale: float | torch.Tensor,
         *,
         complex_kind: str = "mlp",
-        complex_kwargs: dict[str, object] | None = None,
+        complex_kwargs: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(discharge_scale, feature_names)
         self.complex_expert = build_hydrology_complex_expert(
@@ -447,7 +475,9 @@ class SingleComplexHydrologyModel(_HydrologyModelBase):
         data = (prediction.squeeze(-1) - targets).square().mean()
         physics = self.physics_residual(prediction, physical_inputs).square().mean()
         zero = torch.zeros((), device=inputs.device, dtype=inputs.dtype)
-        return HydrologyLosses(data + physics_weight * physics, data, physics, zero, zero, zero + 1.0)
+        return HydrologyLosses(
+            data + physics_weight * physics, data, physics, zero, zero, zero + 1.0
+        )
 
 
 class SingleSimpleHydrologyModel(_HydrologyModelBase):
@@ -460,7 +490,7 @@ class SingleSimpleHydrologyModel(_HydrologyModelBase):
         discharge_scale: float | torch.Tensor,
         *,
         simple_kind: str = "rbf",
-        simple_kwargs: dict[str, object] | None = None,
+        simple_kwargs: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(discharge_scale, feature_names)
         flat_dim = sequence_length * len(feature_names)

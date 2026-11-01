@@ -1,37 +1,59 @@
-from datetime import date, timedelta
-from dataclasses import replace
 import csv
+from dataclasses import replace
+from datetime import date, timedelta
 
 import pytest
 import torch
 
-from complexity_ensemble.app import BasinMapComponent, DEFAULT_BASINS, _config_from_ui_values
+from complexity_ensemble.app import DEFAULT_BASINS, BasinMapComponent, _config_from_ui_values
 from complexity_ensemble.camels_ch_chem import CAMELSCHChemPressures
-from complexity_ensemble.hydrology_data import HydrologySeries
 from complexity_ensemble.estreams import EStreamsVegetationSnow
+from complexity_ensemble.hydrology_data import HydrologySeries
 from complexity_ensemble.regional import (
-    BasinCatalogRecord, BasinScopeConfig, CAMELSCHCatalog, CancellationToken,
-    DateRange, DateSplitConfig, ExtremeEventConfig, HyperparameterConfig,
-    ModelArchitectureConfig, PhysicsModelConfig, RegionalExperimentConfig, TrainingStrategyConfig,
-    make_regional_hydrology_data, run_regional_experiment,
+    BasinCatalogRecord,
+    BasinScopeConfig,
+    CAMELSCHCatalog,
+    CancellationToken,
+    DateRange,
+    DateSplitConfig,
+    ExtremeEventConfig,
+    HyperparameterConfig,
+    ModelArchitectureConfig,
+    PhysicsModelConfig,
+    RegionalExperimentConfig,
+    TrainingStrategyConfig,
+    make_regional_hydrology_data,
+    run_regional_experiment,
 )
 
 
 def _series(basin: str, offset: float = 0.0) -> HydrologySeries:
     first = date(2001, 1, 1)
     dates = tuple(first + timedelta(days=index) for index in range(65))
-    forcing = torch.stack((
-        torch.tensor([2.0 if index % 5 == 0 else 0.2 for index in range(65)]),
-        torch.linspace(2, 10, 65), torch.full((65,), 0.5),
-    ), dim=1)
-    return HydrologySeries(dates, torch.linspace(1 + offset, 2 + offset, 65), forcing,
-                           ("precipitation", "temperature", "pet"), basin, "Switzerland")
+    forcing = torch.stack(
+        (
+            torch.tensor([2.0 if index % 5 == 0 else 0.2 for index in range(65)]),
+            torch.linspace(2, 10, 65),
+            torch.full((65,), 0.5),
+        ),
+        dim=1,
+    )
+    return HydrologySeries(
+        dates,
+        torch.linspace(1 + offset, 2 + offset, 65),
+        forcing,
+        ("precipitation", "temperature", "pet"),
+        basin,
+        "Switzerland",
+    )
 
 
 def _dates() -> DateSplitConfig:
-    return DateSplitConfig(DateRange("2001-01-08", "2001-02-02"),
-                           DateRange("2001-02-03", "2001-02-12"),
-                           DateRange("2001-02-13", "2001-03-01"))
+    return DateSplitConfig(
+        DateRange("2001-01-08", "2001-02-02"),
+        DateRange("2001-02-03", "2001-02-12"),
+        DateRange("2001-02-13", "2001-03-01"),
+    )
 
 
 @pytest.mark.parametrize("scope", ["targets_only", "all_basins", "exclude_targets"])
@@ -40,17 +62,25 @@ def test_regional_data_skips_basins_without_required_windows(scope, gap):
     good = _series("good")
     bad = _series("bad")
     if gap == "continuity":
-        bad = replace(bad, dates=tuple(day + timedelta(days=index)
-                                      for index, day in enumerate(bad.dates)))
+        bad = replace(
+            bad, dates=tuple(day + timedelta(days=index) for index, day in enumerate(bad.dates))
+        )
     else:
         interval = getattr(_dates(), gap)
         keep = [index for index, day in enumerate(bad.dates) if not interval.contains(day)]
-        bad = replace(bad, dates=tuple(bad.dates[index] for index in keep),
-                      discharge=bad.discharge[keep], forcings=bad.forcings[keep])
+        bad = replace(
+            bad,
+            dates=tuple(bad.dates[index] for index in keep),
+            discharge=bad.discharge[keep],
+            forcings=bad.forcings[keep],
+        )
     series = {"trainer": _series("trainer"), "good": good, "bad": bad}
     data = make_regional_hydrology_data(
-        series, {"bad": {"only_skipped": 1000}},
-        BasinScopeConfig(("good", "bad"), scope), _dates(), sequence_length=7,
+        series,
+        {"bad": {"only_skipped": 1000}},
+        BasinScopeConfig(("good", "bad"), scope),
+        _dates(),
+        sequence_length=7,
     )
     # Held-out targets need validation and test windows, not training windows.
     should_skip = scope != "exclude_targets" or gap != "train"
@@ -61,14 +91,18 @@ def test_regional_data_skips_basins_without_required_windows(scope, gap):
         assert "bad" not in data.validation.basin_ids
         assert "bad" not in data.test.basin_ids
         assert "only_skipped" not in data.static_feature_names
-    assert data.train.targets.numel() and data.validation.targets.numel() and data.test.targets.numel()
+    assert (
+        data.train.targets.numel() and data.validation.targets.numel() and data.test.targets.numel()
+    )
 
 
 def test_regional_data_skips_unusable_training_only_basin():
     data = make_regional_hydrology_data(
-        {"trainer": _series("trainer"), "target": _series("target")}, {},
+        {"trainer": _series("trainer"), "target": _series("target")},
+        {},
         BasinScopeConfig(("target",), "exclude_targets", ("trainer", "missing", "target")),
-        _dates(), sequence_length=7,
+        _dates(),
+        sequence_length=7,
     )
     assert data.training_basins == ("trainer",)
     assert data.target_basins == ("target",)
@@ -79,9 +113,11 @@ def test_regional_data_skips_unusable_training_only_basin():
 def test_regional_data_explains_when_no_usable_basins_remain(scope):
     with pytest.raises(ValueError, match="No usable .* remain"):
         make_regional_hydrology_data(
-            {"target": _series("target")}, {},
+            {"target": _series("target")},
+            {},
             BasinScopeConfig(("target",), scope, ("target", "missing")),
-            _dates(), sequence_length=70,
+            _dates(),
+            sequence_length=70,
         )
 
 
@@ -94,9 +130,12 @@ def test_regional_run_skips_target_load_errors_and_records_used_basins(monkeypat
 
     monkeypatch.setattr(catalog, "load_series", missing_series)
     config = RegionalExperimentConfig(
-        ".", BasinScopeConfig(("bad", "good"), "targets_only"), _dates(),
-        ModelArchitectureConfig(complex_expert="mlp", simple_expert="fourier",
-                                mlp_widths=(8,), fourier_frequencies=4),
+        ".",
+        BasinScopeConfig(("bad", "good"), "targets_only"),
+        _dates(),
+        ModelArchitectureConfig(
+            complex_expert="mlp", simple_expert="fourier", mlp_widths=(8,), fourier_frequencies=4
+        ),
         TrainingStrategyConfig("no_routing", 1, 1, 1, 1),
         HyperparameterConfig(sequence_length=7, batch_size=128),
     )
@@ -109,6 +148,7 @@ def test_regional_run_skips_target_load_errors_and_records_used_basins(monkeypat
     assert "bad" in result.resolved_config["skipped_basins"]
     assert config.basins.target_basins == ("bad", "good")
     from complexity_ensemble.configuration import config_from_mapping
+
     rerun_config = config_from_mapping(result.resolved_config)
     assert rerun_config.basins.target_basins == ("good",)
     assert rerun_config.basins.eligible_basins == ("good",)
@@ -122,15 +162,16 @@ def _write_estreams(root, gauge_ids=("a", "target")):
     with (gauges / "estreams_gauging_stations.csv").open(
         "w", newline="", encoding="utf-8"
     ) as target:
-        writer = csv.DictWriter(
-            target, fieldnames=["basin_id", "gauge_id", "gauge_provider"]
-        )
+        writer = csv.DictWriter(target, fieldnames=["basin_id", "gauge_id", "gauge_provider"])
         writer.writeheader()
         for index, gauge_id in enumerate(gauge_ids):
-            writer.writerow({
-                "basin_id": f"CH{index:06d}", "gauge_id": gauge_id,
-                "gauge_provider": "CH_CAMELS",
-            })
+            writer.writerow(
+                {
+                    "basin_id": f"CH{index:06d}",
+                    "gauge_id": gauge_id,
+                    "gauge_provider": "CH_CAMELS",
+                }
+            )
     filenames = {
         "estreams_LAI_monhtly.csv": (1.0, 2.0),
         "estreams_NDVI_monhtly.csv": (0.2, 0.4),
@@ -141,14 +182,18 @@ def _write_estreams(root, gauge_ids=("a", "target")):
         with (attributes / filename).open("w", newline="", encoding="utf-8") as target:
             writer = csv.DictWriter(target, fieldnames=fields)
             writer.writeheader()
-            writer.writerow({"date": "2001-01-31", **{
-                field: monthly_values[0] + index
-                for index, field in enumerate(fields[1:])
-            }})
-            writer.writerow({"date": "2001-02-28", **{
-                field: monthly_values[1] + index
-                for index, field in enumerate(fields[1:])
-            }})
+            writer.writerow(
+                {
+                    "date": "2001-01-31",
+                    **{field: monthly_values[0] + index for index, field in enumerate(fields[1:])},
+                }
+            )
+            writer.writerow(
+                {
+                    "date": "2001-02-28",
+                    **{field: monthly_values[1] + index for index, field in enumerate(fields[1:])},
+                }
+            )
 
 
 def _write_camels_chem(root, gauge_ids=("a", "target")):
@@ -176,14 +221,24 @@ def _write_camels_chem(root, gauge_ids=("a", "target")):
             ) as target:
                 writer = csv.DictWriter(target, fieldnames=["date", *columns])
                 writer.writeheader()
-                writer.writerow({
-                    "date": "2000",
-                    **{column: value + basin_index for column, value in zip(columns, annual_values)},
-                })
-                writer.writerow({
-                    "date": "2001",
-                    **{column: value + 10 + basin_index for column, value in zip(columns, annual_values)},
-                })
+                writer.writerow(
+                    {
+                        "date": "2000",
+                        **{
+                            column: value + basin_index
+                            for column, value in zip(columns, annual_values)
+                        },
+                    }
+                )
+                writer.writerow(
+                    {
+                        "date": "2001",
+                        **{
+                            column: value + 10 + basin_index
+                            for column, value in zip(columns, annual_values)
+                        },
+                    }
+                )
     isotopes = aggregated / "rain_water_isotopes"
     isotopes.mkdir(parents=True)
     for basin_index, gauge_id in enumerate(gauge_ids):
@@ -203,9 +258,12 @@ def test_estreams_monthly_features_are_causally_aligned(tmp_path):
     augmented = EStreamsVegetationSnow(tmp_path).augment(source)
 
     assert augmented["a"].forcing_names[-6:] == (
-        "estreams_lai", "estreams_lai_available",
-        "estreams_ndvi", "estreams_ndvi_available",
-        "estreams_snow_cover_fraction", "estreams_snow_cover_fraction_available",
+        "estreams_lai",
+        "estreams_lai_available",
+        "estreams_ndvi",
+        "estreams_ndvi_available",
+        "estreams_snow_cover_fraction",
+        "estreams_snow_cover_fraction_available",
     )
     jan_30 = augmented["a"].dates.index(date(2001, 1, 30))
     jan_31 = augmented["a"].dates.index(date(2001, 1, 31))
@@ -218,11 +276,12 @@ def test_estreams_monthly_features_are_causally_aligned(tmp_path):
     assert external[feb_28].tolist() == pytest.approx([2.0, 1.0, 0.4, 1.0, 0.10, 1.0])
     assert torch.count_nonzero(augmented["missing"].forcings[:, -6:]) == 0
 
-    ndvi_only = EStreamsVegetationSnow(tmp_path).augment(
-        {"a": source["a"]}, ("estreams_ndvi",)
-    )["a"]
+    ndvi_only = EStreamsVegetationSnow(tmp_path).augment({"a": source["a"]}, ("estreams_ndvi",))[
+        "a"
+    ]
     assert ndvi_only.forcing_names[-2:] == (
-        "estreams_ndvi", "estreams_ndvi_available",
+        "estreams_ndvi",
+        "estreams_ndvi_available",
     )
     assert ndvi_only.forcings.shape[1] == source["a"].forcings.shape[1] + 2
 
@@ -232,13 +291,17 @@ def test_estreams_monthly_features_are_causally_aligned(tmp_path):
 
 def test_regional_run_can_add_estreams_features(tmp_path):
     _write_estreams(tmp_path)
-    series = {"a": _series("a"), "target": _series("target", .4)}
+    series = {"a": _series("a"), "target": _series("target", 0.4)}
     catalog = CAMELSCHCatalog(".", [BasinCatalogRecord(key) for key in series])
     config = RegionalExperimentConfig(
-        ".", BasinScopeConfig(("target",), "exclude_targets"), _dates(),
+        ".",
+        BasinScopeConfig(("target",), "exclude_targets"),
+        _dates(),
         ModelArchitectureConfig(
-            complex_expert="mlp", simple_expert="fourier",
-            mlp_widths=(8,), fourier_frequencies=4,
+            complex_expert="mlp",
+            simple_expert="fourier",
+            mlp_widths=(8,),
+            fourier_frequencies=4,
         ),
         TrainingStrategyConfig("no_routing", 1, 1, 1, 1),
         HyperparameterConfig(sequence_length=7, batch_size=128),
@@ -251,9 +314,12 @@ def test_regional_run_can_add_estreams_features(tmp_path):
     assert result.resolved_config["estreams_root"] == str(tmp_path)
     assert result.resolved_config["analysis_task"] == "daily_discharge_forecasting"
     assert result.resolved_config["feature_names"][3:9] == [
-        "estreams_lai", "estreams_lai_available",
-        "estreams_ndvi", "estreams_ndvi_available",
-        "estreams_snow_cover_fraction", "estreams_snow_cover_fraction_available",
+        "estreams_lai",
+        "estreams_lai_available",
+        "estreams_ndvi",
+        "estreams_ndvi_available",
+        "estreams_snow_cover_fraction",
+        "estreams_snow_cover_fraction_available",
     ]
 
 
@@ -275,12 +341,30 @@ def test_camels_chem_pressures_are_selectable_and_causally_aligned(tmp_path):
     jan_14 = augmented["a"].dates.index(date(2001, 1, 14))
     jan_15 = augmented["a"].dates.index(date(2001, 1, 15))
     values = augmented["a"].forcings[:, -8:]
-    assert values[jan_14].tolist() == pytest.approx([
-        100.0, 1.0, 0.5, 1.0, 20.0, 1.0, 0.0, 0.0,
-    ])
-    assert values[jan_15].tolist() == pytest.approx([
-        100.0, 1.0, 0.5, 1.0, 20.0, 1.0, -12.0, 1.0,
-    ])
+    assert values[jan_14].tolist() == pytest.approx(
+        [
+            100.0,
+            1.0,
+            0.5,
+            1.0,
+            20.0,
+            1.0,
+            0.0,
+            0.0,
+        ]
+    )
+    assert values[jan_15].tolist() == pytest.approx(
+        [
+            100.0,
+            1.0,
+            0.5,
+            1.0,
+            20.0,
+            1.0,
+            -12.0,
+            1.0,
+        ]
+    )
     assert torch.count_nonzero(augmented["missing"].forcings[:, -8:]) == 0
     with pytest.raises(ValueError, match="at least one"):
         CAMELSCHChemPressures(tmp_path).augment({"a": source["a"]}, ())
@@ -288,13 +372,17 @@ def test_camels_chem_pressures_are_selectable_and_causally_aligned(tmp_path):
 
 def test_regional_run_can_add_camels_chem_features(tmp_path):
     _write_camels_chem(tmp_path)
-    series = {"a": _series("a"), "target": _series("target", .4)}
+    series = {"a": _series("a"), "target": _series("target", 0.4)}
     catalog = CAMELSCHCatalog(".", [BasinCatalogRecord(key) for key in series])
     config = RegionalExperimentConfig(
-        ".", BasinScopeConfig(("target",), "exclude_targets"), _dates(),
+        ".",
+        BasinScopeConfig(("target",), "exclude_targets"),
+        _dates(),
         ModelArchitectureConfig(
-            complex_expert="mlp", simple_expert="fourier",
-            mlp_widths=(8,), fourier_frequencies=4,
+            complex_expert="mlp",
+            simple_expert="fourier",
+            mlp_widths=(8,),
+            fourier_frequencies=4,
         ),
         TrainingStrategyConfig("no_routing", 1, 1, 1, 1),
         HyperparameterConfig(sequence_length=7, batch_size=128),
@@ -310,11 +398,17 @@ def test_regional_run_can_add_camels_chem_features(tmp_path):
 
 
 def test_scope_and_target_date_splits_are_leakage_free():
-    series = {"a": _series("a"), "b": _series("b", .2), "target": _series("target", .4)}
-    data = make_regional_hydrology_data(series,
-        {key: {"height": value, "missing": None if key == "target" else value}
-         for value, key in enumerate(series)},
-        BasinScopeConfig(("target",), "all_except_targets"), _dates(), sequence_length=7)
+    series = {"a": _series("a"), "b": _series("b", 0.2), "target": _series("target", 0.4)}
+    data = make_regional_hydrology_data(
+        series,
+        {
+            key: {"height": value, "missing": None if key == "target" else value}
+            for value, key in enumerate(series)
+        },
+        BasinScopeConfig(("target",), "all_except_targets"),
+        _dates(),
+        sequence_length=7,
+    )
     assert set(data.train.basin_ids) == {"a", "b"}
     assert set(data.validation.basin_ids) == {"target"}
     assert set(data.test.basin_ids) == {"target"}
@@ -323,21 +417,32 @@ def test_scope_and_target_date_splits_are_leakage_free():
 
 
 def test_all_strategies_run_on_synthetic_regional_data():
-    series = {"a": _series("a"), "b": _series("b", .2), "target": _series("target", .4)}
-    catalog = CAMELSCHCatalog(".", [
-        BasinCatalogRecord(key, key, {"height": index})
-        for index, key in enumerate(series)
-    ])
+    series = {"a": _series("a"), "b": _series("b", 0.2), "target": _series("target", 0.4)}
+    catalog = CAMELSCHCatalog(
+        ".", [BasinCatalogRecord(key, key, {"height": index}) for index, key in enumerate(series)]
+    )
     for approach in (
-        "soft_routing", "hard_routing", "distillation", "no_routing",
-        "static_50_50", "ood_fallback",
+        "soft_routing",
+        "hard_routing",
+        "distillation",
+        "no_routing",
+        "static_50_50",
+        "ood_fallback",
     ):
-        config = RegionalExperimentConfig(".", BasinScopeConfig(("target",), "exclude_targets"),
-            _dates(), ModelArchitectureConfig(complex_expert="mlp", simple_expert="fourier",
-                mlp_widths=(8,), fourier_frequencies=4),
+        config = RegionalExperimentConfig(
+            ".",
+            BasinScopeConfig(("target",), "exclude_targets"),
+            _dates(),
+            ModelArchitectureConfig(
+                complex_expert="mlp",
+                simple_expert="fourier",
+                mlp_widths=(8,),
+                fourier_frequencies=4,
+            ),
             TrainingStrategyConfig(approach, 1, 1, 1, 1),
             HyperparameterConfig(sequence_length=7, batch_size=128),
-            extremes=ExtremeEventConfig("statistical"))
+            extremes=ExtremeEventConfig("statistical"),
+        )
         result = run_regional_experiment(config, catalog=catalog, series_by_basin=series)
         assert result.predictions and not result.failures
         assert set(result.per_basin_metrics) == {"target"}
@@ -351,27 +456,35 @@ def test_all_strategies_run_on_synthetic_regional_data():
 
 
 def test_pre_cancelled_run_returns_partial_result():
-    series = {"a": _series("a"), "target": _series("target", .4)}
+    series = {"a": _series("a"), "target": _series("target", 0.4)}
     catalog = CAMELSCHCatalog(".", [BasinCatalogRecord(key) for key in series])
-    token = CancellationToken(); token.cancel()
-    config = RegionalExperimentConfig(".", BasinScopeConfig(("target",), "exclude_targets"),
-        _dates(), strategy=TrainingStrategyConfig(epochs=1),
-        hyperparameters=HyperparameterConfig(sequence_length=7))
-    result = run_regional_experiment(config, cancellation_token=token,
-                                     catalog=catalog, series_by_basin=series)
+    token = CancellationToken()
+    token.cancel()
+    config = RegionalExperimentConfig(
+        ".",
+        BasinScopeConfig(("target",), "exclude_targets"),
+        _dates(),
+        strategy=TrainingStrategyConfig(epochs=1),
+        hyperparameters=HyperparameterConfig(sequence_length=7),
+    )
+    result = run_regional_experiment(
+        config, cancellation_token=token, catalog=catalog, series_by_basin=series
+    )
     assert result.cancelled and not result.predictions
 
 
 def test_stacking_uses_target_validation_after_target_training():
-    series = {"a": _series("a"), "target": _series("target", .4)}
+    series = {"a": _series("a"), "target": _series("target", 0.4)}
     catalog = CAMELSCHCatalog(".", [BasinCatalogRecord(key) for key in series])
     config = RegionalExperimentConfig(
         ".",
         BasinScopeConfig(("target",), "all_basins"),
         _dates(),
         ModelArchitectureConfig(
-            complex_expert="mlp", simple_expert="fourier",
-            mlp_widths=(8,), fourier_frequencies=4,
+            complex_expert="mlp",
+            simple_expert="fourier",
+            mlp_widths=(8,),
+            fourier_frequencies=4,
         ),
         TrainingStrategyConfig("stacking", 1, 1, 1, 1),
         HyperparameterConfig(sequence_length=7, batch_size=128),
@@ -387,7 +500,9 @@ def test_stacking_uses_target_validation_after_target_training():
 
 def test_stacking_rejects_excluded_target_training_scope():
     config = RegionalExperimentConfig(
-        ".", BasinScopeConfig(("target",), "exclude_targets"), _dates(),
+        ".",
+        BasinScopeConfig(("target",), "exclude_targets"),
+        _dates(),
         strategy=TrainingStrategyConfig(approach="stacking"),
     )
 
@@ -397,7 +512,9 @@ def test_stacking_rejects_excluded_target_training_scope():
 
 def test_regional_kan_correction_has_a_clear_migration_error():
     config = RegionalExperimentConfig(
-        ".", BasinScopeConfig(("target",), "all_basins"), _dates(),
+        ".",
+        BasinScopeConfig(("target",), "all_basins"),
+        _dates(),
         physics=PhysicsModelConfig(optimization_mode="balanced"),
     )
     with pytest.raises(ValueError, match="separate KAN case study"):
@@ -406,11 +523,40 @@ def test_regional_kan_correction_has_a_clear_migration_error():
 
 def test_gradio_values_map_to_the_correct_configuration_fields():
     values = [
-        "2001-01-08", "2001-02-02", "2001-02-03", "2001-02-12",
-        "2001-02-13", "2001-03-01", "distillation", "mlp", "fourier",
-        3, 7, "4,5", 16, 0.002, 0.1, 75, 0.2, 0.3, 0.4,
-        6, 7, 8, "12,10", 14, 2, 48, 9, 11, "statistical",
-        0.5, 0.6, "cpu", "quantile", 0.9,
+        "2001-01-08",
+        "2001-02-02",
+        "2001-02-03",
+        "2001-02-12",
+        "2001-02-13",
+        "2001-03-01",
+        "distillation",
+        "mlp",
+        "fourier",
+        3,
+        7,
+        "4,5",
+        16,
+        0.002,
+        0.1,
+        75,
+        0.2,
+        0.3,
+        0.4,
+        6,
+        7,
+        8,
+        "12,10",
+        14,
+        2,
+        48,
+        9,
+        11,
+        "statistical",
+        0.5,
+        0.6,
+        "cpu",
+        "quantile",
+        0.9,
     ]
     config = _config_from_ui_values("/data", ["target"], "exclude_targets", values)
     assert config.model.mlp_widths == (12, 10)
@@ -424,13 +570,54 @@ def test_gradio_values_map_to_the_correct_configuration_fields():
 
 def test_gradio_retired_slots_do_not_enable_old_kan_workflow():
     values = [
-        "2001-01-08", "2001-02-02", "2001-02-03", "2001-02-12",
-        "2001-02-13", "2001-03-01", "hard_routing", "mlp", "fourier",
-        3, 7, "4", 16, 0.002, 0.1, 75, 0.2, 0.3, 0.4,
-        6, 7, 8, "12,10", 14, 2, 48, 9, 11, "none",
-        0.5, 0.6, "cpu", "quantile", 0.9, 0.99, 0.1,
-        "distillation", "static_50_50", 4, 60, 5, 3, 3, 2, 0.002,
-        "0.03,0.1", 0.07, False,
+        "2001-01-08",
+        "2001-02-02",
+        "2001-02-03",
+        "2001-02-12",
+        "2001-02-13",
+        "2001-03-01",
+        "hard_routing",
+        "mlp",
+        "fourier",
+        3,
+        7,
+        "4",
+        16,
+        0.002,
+        0.1,
+        75,
+        0.2,
+        0.3,
+        0.4,
+        6,
+        7,
+        8,
+        "12,10",
+        14,
+        2,
+        48,
+        9,
+        11,
+        "none",
+        0.5,
+        0.6,
+        "cpu",
+        "quantile",
+        0.9,
+        0.99,
+        0.1,
+        "distillation",
+        "static_50_50",
+        4,
+        60,
+        5,
+        3,
+        3,
+        2,
+        0.002,
+        "0.03,0.1",
+        0.07,
+        False,
     ]
 
     config = _config_from_ui_values("/data", ["target"], "targets_only", values)
@@ -438,11 +625,17 @@ def test_gradio_retired_slots_do_not_enable_old_kan_workflow():
     assert config.physics.optimization_mode == "none"
 
     configured = _config_from_ui_values(
-        "/data", ["target"], "targets_only",
+        "/data",
+        ["target"],
+        "targets_only",
         [
             *values,
-            True, "/mnt/c/Downloads/estreams_dataset", ["estreams_ndvi"],
-            True, "/mnt/c/Downloads/camels-ch-chem", ["chem_deposition_n_total"],
+            True,
+            "/mnt/c/Downloads/estreams_dataset",
+            ["estreams_ndvi"],
+            True,
+            "/mnt/c/Downloads/camels-ch-chem",
+            ["chem_deposition_n_total"],
         ],
     )
     assert configured.estreams_root == "/mnt/c/Downloads/estreams_dataset"
@@ -451,12 +644,26 @@ def test_gradio_retired_slots_do_not_enable_old_kan_workflow():
     assert configured.camels_chem_features == ("chem_deposition_n_total",)
 
     event_setup = _config_from_ui_values(
-        "/data", ["target"], "targets_only",
+        "/data",
+        ["target"],
+        "targets_only",
         [
             *values,
-            False, "", ["estreams_ndvi"], False, "", ["chem_deposition_n_total"],
-            "rolling", 14, ["low_flow_spell", "rapid_rise"],
-            0.85, 0.15, 0.9, 5, 4, 2,
+            False,
+            "",
+            ["estreams_ndvi"],
+            False,
+            "",
+            ["chem_deposition_n_total"],
+            "rolling",
+            14,
+            ["low_flow_spell", "rapid_rise"],
+            0.85,
+            0.15,
+            0.9,
+            5,
+            4,
+            2,
         ],
     )
     assert event_setup.forecast.mode == "rolling"
@@ -465,11 +672,17 @@ def test_gradio_retired_slots_do_not_enable_old_kan_workflow():
     assert event_setup.extremes.minimum_days == 5
 
     disabled = _config_from_ui_values(
-        "/data", ["target"], "targets_only",
+        "/data",
+        ["target"],
+        "targets_only",
         [
             *values,
-            False, "/invalid/path", ["estreams_ndvi"],
-            False, "/invalid/chem", ["chem_deposition_n_total"],
+            False,
+            "/invalid/path",
+            ["estreams_ndvi"],
+            False,
+            "/invalid/chem",
+            ["chem_deposition_n_total"],
         ],
     )
     assert disabled.estreams_root is None
@@ -478,8 +691,21 @@ def test_gradio_retired_slots_do_not_enable_old_kan_workflow():
 
 def test_established_basin_set_is_the_application_default():
     assert DEFAULT_BASINS == (
-        "4009", "4008", "2488", "2109", "2011", "2126", "5001", "2247",
-        "4022", "4023", "5009", "5010", "5016", "3014", "3015",
+        "4009",
+        "4008",
+        "2488",
+        "2109",
+        "2011",
+        "2126",
+        "5001",
+        "2247",
+        "4022",
+        "4023",
+        "5009",
+        "5010",
+        "5016",
+        "3014",
+        "3015",
     )
 
 
@@ -491,10 +717,13 @@ def test_basin_map_payload_contains_geojson_and_selection_state():
             "coordinates": (((7.0, 46.0), (8.0, 46.0), (8.0, 47.0), (7.0, 46.0)),),
         }
 
-    catalog = CAMELSCHCatalog(".", [
-        BasinCatalogRecord("a", "Alpha", eligible=True, geometry=Geometry()),
-        BasinCatalogRecord("b", "Beta", eligible=False),
-    ])
+    catalog = CAMELSCHCatalog(
+        ".",
+        [
+            BasinCatalogRecord("a", "Alpha", eligible=True, geometry=Geometry()),
+            BasinCatalogRecord("b", "Beta", eligible=False),
+        ],
+    )
     payload = BasinMapComponent(catalog).payload(
         ["a"], active="a", training=["a"], interaction="toggle"
     )
@@ -503,7 +732,9 @@ def test_basin_map_payload_contains_geojson_and_selection_state():
     assert payload["active"] == "a"
     assert payload["interaction"] == "toggle"
     assert payload["geojson"]["features"][0]["properties"] == {
-        "basin_id": "a", "name": "Alpha", "eligible": True,
+        "basin_id": "a",
+        "name": "Alpha",
+        "eligible": True,
     }
     assert payload["geojson"]["features"][0]["geometry"]["type"] == "Polygon"
 
@@ -515,17 +746,25 @@ def test_catalog_joins_numeric_shapefile_gauge_ids(tmp_path, monkeypatch):
     observed = tmp_path / "timeseries" / "observation_based"
     simulated = tmp_path / "timeseries" / "simulation_based"
     shapes = tmp_path / "catchment_delineations"
-    observed.mkdir(parents=True); simulated.mkdir(parents=True); shapes.mkdir()
+    observed.mkdir(parents=True)
+    simulated.mkdir(parents=True)
+    shapes.mkdir()
     (observed / "CAMELS_CH_obs_based_4009.csv").touch()
     (simulated / "CAMELS_CH_sim_based_4009.csv").touch()
     shape_path = shapes / "CAMELS_CH_catchments.shp"
     shape_path.touch()
     frame = geopandas.GeoDataFrame(
         {"gauge_id": [4009.0]},
-        geometry=[Polygon([
-            (2_600_000, 1_200_000), (2_601_000, 1_200_000),
-            (2_601_000, 1_201_000), (2_600_000, 1_200_000),
-        ])],
+        geometry=[
+            Polygon(
+                [
+                    (2_600_000, 1_200_000),
+                    (2_601_000, 1_200_000),
+                    (2_601_000, 1_201_000),
+                    (2_600_000, 1_200_000),
+                ]
+            )
+        ],
         crs="EPSG:2056",
     )
     monkeypatch.setattr(geopandas, "read_file", lambda path: frame)
@@ -553,7 +792,8 @@ def test_catalog_loads_catchment_areas_with_accented_metadata(tmp_path, encoding
         "# Topographic attributes\n"
         "gauge_id,gauge_name,water_body_name,area\n"
         "2063,Murgenthal,Aare,10059.4\n"
-        "2067,Martina,Rhône,1937.5\n", encoding=encoding,
+        "2067,Martina,Rhône,1937.5\n",
+        encoding=encoding,
     )
     catalog = CAMELSCHCatalog(tmp_path)
     assert station_areas(catalog) == {"2063": 10059.4, "2067": 1937.5}
@@ -563,7 +803,8 @@ def test_catalog_loads_catchment_areas_with_accented_metadata(tmp_path, encoding
 def test_regional_catalog_does_not_require_optional_annual_landcover(tmp_path):
     observed = tmp_path / "timeseries" / "observation_based"
     simulated = tmp_path / "timeseries" / "simulation_based"
-    observed.mkdir(parents=True); simulated.mkdir(parents=True)
+    observed.mkdir(parents=True)
+    simulated.mkdir(parents=True)
     with (observed / "CAMELS_CH_obs_based_4009.csv").open("w", newline="") as target:
         writer = csv.DictWriter(target, fieldnames=["date", "discharge_spec(mm/d)"])
         writer.writeheader()
@@ -571,11 +812,17 @@ def test_regional_catalog_does_not_require_optional_annual_landcover(tmp_path):
             writer.writerow({"date": f"2001/01/{index + 1:02d}", "discharge_spec(mm/d)": 1 + index})
     with (simulated / "CAMELS_CH_sim_based_4009.csv").open("w", newline="") as target:
         fields = ["date", "precipitation_sim(mm/d)", "temperature_sim(degC)", "pet_sim(mm/d)"]
-        writer = csv.DictWriter(target, fieldnames=fields); writer.writeheader()
+        writer = csv.DictWriter(target, fieldnames=fields)
+        writer.writeheader()
         for index in range(5):
-            writer.writerow({"date": f"2001-01-{index + 1:02d}",
-                "precipitation_sim(mm/d)": 2, "temperature_sim(degC)": 5,
-                "pet_sim(mm/d)": .5})
+            writer.writerow(
+                {
+                    "date": f"2001-01-{index + 1:02d}",
+                    "precipitation_sim(mm/d)": 2,
+                    "temperature_sim(degC)": 5,
+                    "pet_sim(mm/d)": 0.5,
+                }
+            )
     catalog = CAMELSCHCatalog(tmp_path)
     series = catalog.load_series("4009", date(2001, 1, 1), date(2001, 1, 5))
     assert len(series.dates) == 5
@@ -584,19 +831,33 @@ def test_regional_catalog_does_not_require_optional_annual_landcover(tmp_path):
 
 @pytest.mark.skipif(not torch.backends.mps.is_available(), reason="MPS is unavailable")
 @pytest.mark.parametrize("complex_expert", ["mlp", "pinnmamba"])
-@pytest.mark.parametrize("approach", [
-    "soft_routing", "hard_routing", "distillation", "no_routing",
-    "static_50_50", "ood_fallback", "stacking",
-])
+@pytest.mark.parametrize(
+    "approach",
+    [
+        "soft_routing",
+        "hard_routing",
+        "distillation",
+        "no_routing",
+        "static_50_50",
+        "ood_fallback",
+        "stacking",
+    ],
+)
 def test_mps_regional_training_and_predictions(complex_expert, approach):
-    series = {"a": _series("a"), "target": _series("target", .4)}
+    series = {"a": _series("a"), "target": _series("target", 0.4)}
     catalog = CAMELSCHCatalog(".", [BasinCatalogRecord(key) for key in series])
     config = RegionalExperimentConfig(
-        ".", BasinScopeConfig(("target",), "all_basins"), _dates(),
+        ".",
+        BasinScopeConfig(("target",), "all_basins"),
+        _dates(),
         ModelArchitectureConfig(
-            complex_expert=complex_expert, simple_expert="fourier",
-            mlp_widths=(8,), fourier_frequencies=4,
-            mamba_hidden_size=8, mamba_layers=1, mamba_feed_forward_size=8,
+            complex_expert=complex_expert,
+            simple_expert="fourier",
+            mlp_widths=(8,),
+            fourier_frequencies=4,
+            mamba_hidden_size=8,
+            mamba_layers=1,
+            mamba_feed_forward_size=8,
         ),
         TrainingStrategyConfig(approach, 1, 1, 1, 1),
         HyperparameterConfig(sequence_length=7, batch_size=128, training_noise=0.1, device="mps"),

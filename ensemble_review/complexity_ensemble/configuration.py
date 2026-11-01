@@ -1,36 +1,53 @@
 """Configuration mapping shared by CLI, application services, and HTTP adapters."""
+
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import fields, is_dataclass
 from pathlib import Path
-from typing import Mapping, TypeVar
+from typing import Any, Mapping
 
 from .benchmarks import BenchmarkConfig
 from .camels_ch_chem import DEFAULT_CAMELS_CH_CHEM_FEATURES
 from .estreams import ESTREAMS_DYNAMIC_FEATURES
 from .hyd_responses import DEFAULT_HYD_RESPONSES_FEATURES
 from .regional import (
-    BasinScopeConfig, DateRange, DateSplitConfig, ExtremeEventConfig, ForecastConfig,
-    HyperparameterConfig, ModelArchitectureConfig, PhysicsModelConfig,
-    RegionalExperimentConfig, TrainingStrategyConfig,
+    BasinScopeConfig,
+    DateRange,
+    DateSplitConfig,
+    ExtremeEventConfig,
+    ForecastConfig,
+    HyperparameterConfig,
+    ModelArchitectureConfig,
+    PhysicsModelConfig,
+    RegionalExperimentConfig,
+    TrainingStrategyConfig,
 )
 
-T = TypeVar("T")
 
-
-def _dataclass_values(cls: type[T], value: Mapping[str, object]) -> dict[str, object]:
+def _dataclass_values(cls: type[object], value: Mapping[str, object]) -> dict[str, Any]:
+    # JSON supplies heterogeneous field values; the concrete dataclass constructor
+    # and its validation own their types after this shared conversion boundary.
+    if not is_dataclass(cls):
+        raise TypeError("configuration sections must be dataclasses")
     allowed = {item.name for item in fields(cls)}
     result = {key: item for key, item in value.items() if key in allowed}
     for key in (
-        "mlp_widths", "seeds", "robustness_noise_levels", "event_types", "release_states",
+        "mlp_widths",
+        "seeds",
+        "robustness_noise_levels",
+        "event_types",
+        "release_states",
     ):
-        if key in result and isinstance(result[key], list):
-            result[key] = tuple(result[key])  # type: ignore[index]
+        item = result.get(key)
+        if isinstance(item, list):
+            result[key] = tuple(item)
     return result
 
 
 def config_from_mapping(
-    value: Mapping[str, object], *, data_root: str | Path | None = None,
+    value: Mapping[str, object],
+    *,
+    data_root: str | Path | None = None,
     estreams_root: str | Path | None = None,
     camels_chem_root: str | Path | None = None,
     hyd_responses_root: str | Path | None = None,
@@ -60,20 +77,13 @@ def config_from_mapping(
         return DateRange(str(item["start"]), str(item["end"]))
 
     resolved_root = data_root if data_root is not None else value.get("data_root")
-    if resolved_root in (None, ""):
+    if not isinstance(resolved_root, (str, Path)) or resolved_root == "":
         raise ValueError("data_root is required in the config or as --data-root")
     targets = basin_value.get("target_basins", ())
     eligible = basin_value.get("eligible_basins")
-    resolved_estreams = (
-        estreams_root if estreams_root is not None else value.get("estreams_root")
-    )
     estreams_features = value.get("estreams_features", ESTREAMS_DYNAMIC_FEATURES)
-    resolved_chem = (
-        camels_chem_root if camels_chem_root is not None else value.get("camels_chem_root")
-    )
     chem_features = value.get("camels_chem_features", DEFAULT_CAMELS_CH_CHEM_FEATURES)
     state_features = value.get("camels_state_features", ())
-    resolved_hyd = hyd_responses_root if hyd_responses_root is not None else value.get("hyd_responses_root")
     hyd_features = value.get("hyd_responses_features", DEFAULT_HYD_RESPONSES_FEATURES)
     if not isinstance(hyd_features, (list, tuple)):
         raise ValueError("hyd_responses_features must be a list of feature names")
@@ -82,6 +92,15 @@ def config_from_mapping(
         raise ValueError("hyd_responses_static must be a boolean")
     if not isinstance(state_features, (list, tuple)):
         raise ValueError("camels_state_features must be a list of feature names")
+
+    def optional_path(name: str, override: str | Path | None) -> str | Path | None:
+        item = override if override is not None else value.get(name)
+        if item in (None, ""):
+            return None
+        if not isinstance(item, (str, Path)):
+            raise ValueError(f"{name} must be a path string")
+        return item
+
     return RegionalExperimentConfig(
         resolved_root,
         BasinScopeConfig(
@@ -95,13 +114,13 @@ def config_from_mapping(
         HyperparameterConfig(**_dataclass_values(HyperparameterConfig, section("hyperparameters"))),
         PhysicsModelConfig(**_dataclass_values(PhysicsModelConfig, section("physics"))),
         ExtremeEventConfig(**_dataclass_values(ExtremeEventConfig, section("extremes"))),
-        estreams_root=resolved_estreams if resolved_estreams not in (None, "") else None,
+        estreams_root=optional_path("estreams_root", estreams_root),
         estreams_features=(
             tuple(map(str, estreams_features))
             if isinstance(estreams_features, (list, tuple))
             else ESTREAMS_DYNAMIC_FEATURES
         ),
-        camels_chem_root=resolved_chem if resolved_chem not in (None, "") else None,
+        camels_chem_root=optional_path("camels_chem_root", camels_chem_root),
         camels_chem_features=(
             tuple(map(str, chem_features))
             if isinstance(chem_features, (list, tuple))
@@ -109,13 +128,11 @@ def config_from_mapping(
         ),
         forecast=ForecastConfig(**_dataclass_values(ForecastConfig, section("forecast"))),
         camels_state_features=tuple(map(str, state_features)),
-        hyd_responses_root=resolved_hyd if resolved_hyd not in (None, "") else None,
+        hyd_responses_root=optional_path("hyd_responses_root", hyd_responses_root),
         hyd_responses_features=tuple(map(str, hyd_features)),
         hyd_responses_static=hyd_static,
         benchmark=BenchmarkConfig(**_dataclass_values(BenchmarkConfig, section("benchmark"))),
-        bafu_root=bafu_root if bafu_root is not None else value.get("bafu_root"),
-        bafu_statistics_zip=bafu_statistics_zip if bafu_statistics_zip is not None else value.get("bafu_statistics_zip"),
-        bafu_return_levels=bafu_return_levels if bafu_return_levels is not None else value.get("bafu_return_levels"),
+        bafu_root=optional_path("bafu_root", bafu_root),
+        bafu_statistics_zip=optional_path("bafu_statistics_zip", bafu_statistics_zip),
+        bafu_return_levels=optional_path("bafu_return_levels", bafu_return_levels),
     )
-
-

@@ -8,11 +8,11 @@ from dataclasses import asdict, dataclass, replace
 from datetime import date
 from pathlib import Path
 from statistics import mean, stdev
+from typing import Any
 
 import torch
 
 from .devices import DEVICE_CHOICES, randperm, resolve_device, seeded_generator
-
 from .hydrology import HydrologyRoutedOutput, RoutedHydrologyModel
 from .hydrology_comparison import (
     _add_observation_noise,
@@ -30,9 +30,9 @@ from .hydrology_data import (
     make_hydrology_data,
 )
 
-
 DEFAULT_CAMELS_CH_ROOT = Path("/mnt/c/Users/micro/Downloads/camels_ch/camels_ch")
 VERBOSE = False
+
 
 @dataclass(frozen=True)
 class EvaluationPeriod:
@@ -177,19 +177,14 @@ def train_hydrology_distill_to_simple(
             complex_optimizer.zero_grad()
             prediction = model._positive_discharge(model.complex_expert(batch_inputs))
             data_loss = (prediction.squeeze(-1) - targets[indices]).square().mean()
-            physics_loss = model.physics_residual(
-                prediction, physical[indices]
-            ).square().mean()
+            physics_loss = model.physics_residual(prediction, physical[indices]).square().mean()
             loss = data_loss + physics_weight * physics_loss
             loss.backward()
             complex_optimizer.step()
             epoch_total += float(loss.detach()) * len(indices)
         complex_losses.append(_epoch_average(epoch_total, len(inputs)))
         if verbose:
-            print(
-                f"  complex epoch {epoch + 1}/{complex_epochs}: "
-                f"loss={complex_losses[-1]:.6f}"
-            )
+            print(f"  complex epoch {epoch + 1}/{complex_epochs}: loss={complex_losses[-1]:.6f}")
     complex_seconds = time.perf_counter() - complex_started
 
     model.complex_expert.eval()
@@ -239,9 +234,7 @@ def train_hydrology_distill_to_simple(
         print("[3/3] jointly consolidating routed experts")
     for epoch in range(consolidation_epochs):
         epoch_total = 0.0
-        permutation = randperm(
-            len(inputs), generator=consolidation_generator, device=device
-        )
+        permutation = randperm(len(inputs), generator=consolidation_generator, device=device)
         for start in range(0, len(inputs), batch_size):
             indices = permutation[start : start + batch_size]
             batch_inputs = _add_observation_noise(
@@ -311,11 +304,8 @@ __all__ = [
 ]
 
 
-
 def _csv_values(value: str, cast: type) -> tuple:
-    values = tuple(
-        dict.fromkeys(cast(item.strip()) for item in value.split(",") if item.strip())
-    )
+    values = tuple(dict.fromkeys(cast(item.strip()) for item in value.split(",") if item.strip()))
     if not values:
         raise argparse.ArgumentTypeError("comma-separated value must not be empty")
     return values
@@ -341,9 +331,7 @@ def _parse_boolean(value: str) -> bool:
     raise argparse.ArgumentTypeError("expected true or false")
 
 
-def _load_period(
-    args: argparse.Namespace, basin: str, period: EvaluationPeriod
-) -> HydrologySeries:
+def _load_period(args: argparse.Namespace, basin: str, period: EvaluationPeriod) -> HydrologySeries:
     if args.source == "camels_ch":
         return load_camels_ch(
             args.data_root,
@@ -392,7 +380,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--models", default="morse,learned,single_complex")
     parser.add_argument("--seeds", default="0")
     parser.add_argument(
-        "--complex-epochs", "--epochs", dest="complex_epochs", type=int, default=20,
+        "--complex-epochs",
+        "--epochs",
+        dest="complex_epochs",
+        type=int,
+        default=20,
         help="Complex-teacher epochs; --epochs is an alias",
     )
     parser.add_argument("--distillation-epochs", type=int, default=150)
@@ -417,12 +409,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _configuration(args: argparse.Namespace) -> dict:
-    result = {}
+    result: dict[str, Any] = {}
     for key, value in vars(args).items():
         if isinstance(value, Path):
             result[key] = str(value)
         elif isinstance(value, tuple):
-            result[key] = [asdict(item) if isinstance(item, EvaluationPeriod) else item for item in value]
+            result[key] = [
+                asdict(item) if isinstance(item, EvaluationPeriod) else item for item in value
+            ]
         else:
             result[key] = value
     return result
@@ -447,22 +441,24 @@ def _mean_and_std(values: list[float]) -> tuple[float, float]:
 
 def summarize_basin_results(
     records: list[HydrologyDistillationRecord],
-) -> list[dict[str, object]]:
+) -> list[dict[str, str | int | float]]:
     """Aggregate final metrics across seeds and inference-noise draws per basin."""
-    keys = sorted({
-        (
-            record.country,
-            record.basin,
-            record.period,
-            record.period_start,
-            record.period_end,
-            record.model,
-            record.training_method,
-            record.training_noise,
-            record.inference_noise,
-        )
-        for record in records
-    })
+    keys = sorted(
+        {
+            (
+                record.country,
+                record.basin,
+                record.period,
+                record.period_start,
+                record.period_end,
+                record.model,
+                record.training_method,
+                record.training_noise,
+                record.inference_noise,
+            )
+            for record in records
+        }
+    )
     rows = []
     metric_fields = (
         "validation_nse",
@@ -486,9 +482,10 @@ def summarize_basin_results(
                 record.training_method,
                 record.training_noise,
                 record.inference_noise,
-            ) == key
+            )
+            == key
         ]
-        row: dict[str, object] = {
+        row: dict[str, str | int | float] = {
             "country": country,
             "basin": basin,
             "period": period,
@@ -515,12 +512,12 @@ def summarize_basin_results(
     return rows
 
 
-def format_basin_results_table(rows: list[dict[str, object]]) -> str:
+def format_basin_results_table(rows: list[dict[str, str | int | float]]) -> str:
     """Format per-basin aggregates as a compact terminal table."""
     if not rows:
         return "No completed basin results."
 
-    def metric(row: dict[str, object], field: str) -> str:
+    def metric(row: dict[str, str | int | float], field: str) -> str:
         average = float(row[f"{field}_mean"])
         spread = float(row[f"{field}_std"])
         return f"{average:.4f}±{spread:.4f}"
@@ -530,7 +527,11 @@ def format_basin_results_table(rows: list[dict[str, object]]) -> str:
         f"{'n':>4} {'test NSE':>17} {'test KGE':>17} {'RMSE mm/d':>17} "
         f"{'physics':>17} {'train s':>12}"
     )
-    lines = ["Final per-basin results (mean ± sample SD across seeds/draws)", header, "-" * len(header)]
+    lines = [
+        "Final per-basin results (mean ± sample SD across seeds/draws)",
+        header,
+        "-" * len(header),
+    ]
     for row in rows:
         lines.append(
             f"{str(row['basin']):<10} {str(row['period']):<10} "
@@ -565,9 +566,7 @@ def main() -> None:
     args.models = _csv_values(args.models, str)
     args.seeds = _csv_values(args.seeds, int)
     training_noise_value = (
-        str(args.training_noise)
-        if args.training_noise is not None
-        else args.training_noise_levels
+        str(args.training_noise) if args.training_noise is not None else args.training_noise_levels
     )
     args.training_noise_levels = _csv_values(training_noise_value, float)
     args.inference_noise_levels = _csv_values(args.inference_noise_levels, float)
@@ -606,33 +605,45 @@ def main() -> None:
                         for model_name in args.models:
                             print(
                                 f"run model={model_name} seed={seed} "
-                                f"training_noise={training_noise:g}", flush=True,
+                                f"training_noise={training_noise:g}",
+                                flush=True,
                             )
                             torch.manual_seed(seed)
                             model = _make_model(
-                                model_name, data, args.simple, args.complex, None,
-                                args.complexity_percentile, args.gate_temperature,
+                                model_name,
+                                data,
+                                args.simple,
+                                args.complex,
+                                None,
+                                args.complexity_percentile,
+                                args.gate_temperature,
                             ).to(device)
                             started = time.perf_counter()
                             if model_name == "morse":
+                                assert isinstance(model, RoutedHydrologyModel)
                                 report = train_hydrology_distill_to_simple(
-                                    model, data.train,
+                                    model,
+                                    data.train,
                                     complex_epochs=args.complex_epochs,
                                     distillation_epochs=args.distillation_epochs,
                                     consolidation_epochs=args.consolidation_epochs,
                                     batch_size=args.batch_size,
                                     learning_rate=args.learning_rate,
-                                    training_noise=training_noise, seed=seed,
-                                    device=device, feature_names=data.feature_names,
+                                    training_noise=training_noise,
+                                    seed=seed,
+                                    device=device,
+                                    feature_names=data.feature_names,
                                     physics_weight=args.physics_weight,
                                     consolidation_weight=args.consolidation_weight,
                                     verbose=VERBOSE,
                                 )
-                                elapsed = sum((
-                                    report.complex_seconds,
-                                    report.distillation_seconds,
-                                    report.consolidation_seconds,
-                                ))
+                                elapsed = sum(
+                                    (
+                                        report.complex_seconds,
+                                        report.distillation_seconds,
+                                        report.consolidation_seconds,
+                                    )
+                                )
                                 phase_epochs = (
                                     args.complex_epochs,
                                     args.distillation_epochs,
@@ -641,10 +652,13 @@ def main() -> None:
                                 strategy = "distill_to_simple"
                             else:
                                 train_hydrology_model_with_consolidation(
-                                    model, data.train, epochs=args.complex_epochs,
+                                    model,
+                                    data.train,
+                                    epochs=args.complex_epochs,
                                     batch_size=args.batch_size,
                                     learning_rate=args.learning_rate,
-                                    training_noise=training_noise, seed=seed,
+                                    training_noise=training_noise,
+                                    seed=seed,
                                     device=device,
                                     consolidation_weight=args.consolidation_weight,
                                     feature_names=data.feature_names,
@@ -653,7 +667,8 @@ def main() -> None:
                                 elapsed = time.perf_counter() - started
                                 phase_epochs = (args.complex_epochs, 0, 0)
                                 strategy = (
-                                    "joint_baseline" if model_name == "learned"
+                                    "joint_baseline"
+                                    if model_name == "learned"
                                     else "single_baseline"
                                 )
                                 print(f"  baseline training finished in {elapsed:.2f}s", flush=True)
@@ -661,27 +676,48 @@ def main() -> None:
                                 noise_seed = seed + 300007 + 1000003 * draw
                                 for inference_noise in args.inference_noise_levels:
                                     validation = _evaluate(
-                                        model, data.validation, data,
+                                        model,
+                                        data.validation,
+                                        data,
                                         inference_noise=inference_noise,
-                                        seed=noise_seed + 17, device=device,
+                                        seed=noise_seed + 17,
+                                        device=device,
                                     )
                                     test = _evaluate(
-                                        model, data.test, data,
+                                        model,
+                                        data.test,
+                                        data,
                                         inference_noise=inference_noise,
-                                        seed=noise_seed, device=device,
+                                        seed=noise_seed,
+                                        device=device,
                                     )
                                     mean_score, valid_fraction = _routing_diagnostics(
                                         model, data.test.inputs, device
                                     )
                                     record = HydrologyDistillationRecord(
-                                        data.country, basin, period.label,
-                                        period.start, period.end, model_name, strategy,
+                                        data.country,
+                                        basin,
+                                        period.label,
+                                        period.start,
+                                        period.end,
+                                        model_name,
+                                        strategy,
                                         args.simple if model_name != "single_complex" else "none",
-                                        args.complex, seed, training_noise,
-                                        inference_noise, noise_seed, validation[0],
-                                        test[0], test[1], test[2], test[3],
-                                        _parameter_count(model), test[4],
-                                        mean_score, valid_fraction, elapsed,
+                                        args.complex,
+                                        seed,
+                                        training_noise,
+                                        inference_noise,
+                                        noise_seed,
+                                        validation[0],
+                                        test[0],
+                                        test[1],
+                                        test[2],
+                                        test[3],
+                                        _parameter_count(model),
+                                        test[4],
+                                        mean_score,
+                                        valid_fraction,
+                                        elapsed,
                                         *phase_epochs,
                                     )
                                     records.append(record)

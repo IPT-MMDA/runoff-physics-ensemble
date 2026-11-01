@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import torch
+from examples.compare_extreme_event_ensembles import build_parser
 
 from complexity_ensemble.hydrology_data import HydrologySeries, make_hydrology_data
 from complexity_ensemble.hydrology_extreme_comparison import (
@@ -15,15 +16,12 @@ from complexity_ensemble.hydrology_extreme_comparison import (
     extreme_metrics,
     save_extreme_ensemble_records,
 )
-from examples.compare_extreme_event_ensembles import build_parser
 
 
 def _synthetic_data():
     sample_count = 140
     dates = tuple(date(2000, 1, 1) + timedelta(days=index) for index in range(sample_count))
-    rain = torch.tensor(
-        [8.0 if index % 17 in (0, 1) else 0.2 for index in range(sample_count)]
-    )
+    rain = torch.tensor([8.0 if index % 17 in (0, 1) else 0.2 for index in range(sample_count)])
     discharge = torch.tensor(
         [
             1.0 + 0.04 * (index % 17) + (4.0 if index % 17 in (1, 2) else 0.0)
@@ -74,8 +72,12 @@ class ExtremeComparisonTests(unittest.TestCase):
     def test_independent_baseline_approaches_are_selectable(self) -> None:
         config = ExtremeComparisonConfig(
             approaches=("no_routing", "static_50_50", "ood_fallback", "stacking"),
-            seeds=(0,), complex_kind="mlp", epochs=1, batch_size=256,
-            include_baselines=False, inference_noise=0.2,
+            seeds=(0,),
+            complex_kind="mlp",
+            epochs=1,
+            batch_size=256,
+            include_baselines=False,
+            inference_noise=0.2,
         )
         records = compare_extreme_event_ensembles(self.data, config)
         self.assertEqual(
@@ -106,9 +108,7 @@ class ExtremeComparisonTests(unittest.TestCase):
 
     def test_distillation_rejects_jointly_learned_router(self) -> None:
         with self.assertRaisesRegex(ValueError, "fixed 'morse' router"):
-            ExtremeComparisonConfig(
-                approaches=("distillation",), routing="learned"
-            ).validate()
+            ExtremeComparisonConfig(approaches=("distillation",), routing="learned").validate()
 
     def test_event_metrics_decluster_consecutive_days(self) -> None:
         dates = tuple(date(2020, 1, 1) + timedelta(days=index) for index in range(6))
@@ -138,11 +138,16 @@ class ExtremeComparisonTests(unittest.TestCase):
     def test_cli_accepts_an_explicit_comparison(self) -> None:
         args = build_parser().parse_args(
             [
-                "--approaches", "no_routing,static_50_50,ood_fallback,stacking",
-                "--simple", "fourier",
-                "--complex", "pinnmamba",
-                "--seeds", "0,42",
-                "--inference-noise", "0.25",
+                "--approaches",
+                "no_routing,static_50_50,ood_fallback,stacking",
+                "--simple",
+                "fourier",
+                "--complex",
+                "pinnmamba",
+                "--seeds",
+                "0,42",
+                "--inference-noise",
+                "0.25",
             ]
         )
         self.assertEqual(

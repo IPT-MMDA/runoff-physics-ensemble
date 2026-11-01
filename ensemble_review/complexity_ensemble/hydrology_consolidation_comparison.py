@@ -6,7 +6,6 @@ from typing import Mapping
 import torch
 
 from .devices import randperm, resolve_device, seeded_generator
-
 from .hydrology import (
     LearnedHydrologyMorsePotential,
     RoutedHydrologyModel,
@@ -16,18 +15,18 @@ from .hydrology import (
 from .hydrology_comparison import (
     _add_observation_noise,
     _complexity_diagnostics,
+    _estimate_complexity_features,
     _evaluate,
     _make_model,
     _parameter_count,
-    _estimate_complexity_features,
     _prepare_complexity_estimators,
     _select_models,
     hydrology_comparison_summary,
     plot_hydrology_comparison,
     save_hydrology_comparison,
 )
-from .hydrology_data import HydrologyData, HydrologySplit
 from .hydrology_complexity import HydrologyComplexityEstimator
+from .hydrology_data import HydrologyData, HydrologySplit
 
 
 @dataclass(frozen=True)
@@ -105,8 +104,7 @@ def train_hydrology_model_with_consolidation(
             epoch_total += float(losses.total.detach()) * len(indices)
         if verbose:
             print(
-                f"  training epoch {epoch + 1}/{epochs}: "
-                f"loss={epoch_total / len(inputs):.6f}",
+                f"  training epoch {epoch + 1}/{epochs}: loss={epoch_total / len(inputs):.6f}",
                 flush=True,
             )
 

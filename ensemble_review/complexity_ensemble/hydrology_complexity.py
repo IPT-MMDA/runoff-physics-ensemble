@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import math
+from abc import ABC, abstractmethod
+from typing import Any
 
 import torch
-
 
 ROUTING_METHODS = ("morse", "learned_morse", "learned", "tda", "ph", "takens", "lyapunov")
 MODEL_NAMES = (*ROUTING_METHODS, "single_complex")
@@ -55,8 +55,14 @@ class TakensDimensionEstimator(HydrologyComplexityEstimator):
     It is a geometric proxy, not an estimate of the attractor's true dimension.
     """
 
-    def __init__(self, feature_index: int, *, embedding_dim: int = 3,
-                 delay: int = 7, context_length: int | None = None) -> None:
+    def __init__(
+        self,
+        feature_index: int,
+        *,
+        embedding_dim: int = 3,
+        delay: int = 7,
+        context_length: int | None = None,
+    ) -> None:
         if feature_index < 0 or embedding_dim < 2 or delay < 1:
             raise ValueError("invalid feature index, embedding dimension, or delay")
         if context_length is not None and context_length < 2:
@@ -73,7 +79,7 @@ class TakensDimensionEstimator(HydrologyComplexityEstimator):
             raise ValueError("feature_index is outside the routing feature dimension")
         series = routing_windows[:, :, self.feature_index].detach().cpu().double()
         if self.context_length is not None:
-            series = series[:, -self.context_length:]
+            series = series[:, -self.context_length :]
         estimates = []
         for window in series:
             scale = window.std(unbiased=False)
@@ -82,20 +88,20 @@ class TakensDimensionEstimator(HydrologyComplexityEstimator):
                 continue
             points = takens_delay_embedding(
                 (window - window.mean()) / scale,
-                embedding_dim=self.embedding_dim, delay=self.delay,
+                embedding_dim=self.embedding_dim,
+                delay=self.delay,
             )
             centered = points - points.mean(dim=0)
-            eigenvalues = torch.linalg.eigvalsh(
-                centered.T @ centered / len(centered)
-            ).clamp_min(0.0)
+            eigenvalues = torch.linalg.eigvalsh(centered.T @ centered / len(centered)).clamp_min(
+                0.0
+            )
             energy = eigenvalues.sum()
             if not torch.isfinite(energy) or float(energy) < 1e-12:
                 estimates.append((0.0, 0.0))
             else:
                 rank = energy.square() / eigenvalues.square().sum().clamp_min(1e-12)
                 estimates.append((float(rank), 1.0))
-        return torch.tensor(estimates, dtype=routing_windows.dtype,
-                            device=routing_windows.device)
+        return torch.tensor(estimates, dtype=routing_windows.dtype, device=routing_windows.device)
 
 
 class TakensPersistenceEstimator(HydrologyComplexityEstimator):
@@ -118,8 +124,7 @@ class TakensPersistenceEstimator(HydrologyComplexityEstimator):
             raise ValueError("min_persistence must be non-negative")
         if score not in {"total_persistence", "persistent_holes", "persistence_entropy"}:
             raise ValueError(
-                "score must be 'total_persistence', 'persistent_holes', or "
-                "'persistence_entropy'"
+                "score must be 'total_persistence', 'persistent_holes', or 'persistence_entropy'"
             )
         if max_points < 8:
             raise ValueError("max_points must be at least eight")
@@ -246,11 +251,7 @@ class LyapunovComplexityEstimator(HydrologyComplexityEstimator):
         valid_neighbour = torch.isfinite(nearest_distance) & (nearest_distance > 1e-9)
         divergence = []
         for step in range(self.fit_horizon):
-            valid = (
-                valid_neighbour
-                & (positions + step < count)
-                & (nearest + step < count)
-            )
+            valid = valid_neighbour & (positions + step < count) & (nearest + step < count)
             if int(valid.sum()) < 4:
                 break
             distance = torch.linalg.vector_norm(
@@ -267,9 +268,8 @@ class LyapunovComplexityEstimator(HydrologyComplexityEstimator):
             x = torch.arange(stop, dtype=y.dtype) * stride
             x_centered = x - x.mean()
             slope = (
-                (x_centered * (candidate - candidate.mean())).sum()
-                / x_centered.square().sum().clamp_min(1e-12)
-            )
+                x_centered * (candidate - candidate.mean())
+            ).sum() / x_centered.square().sum().clamp_min(1e-12)
             fitted = candidate.mean() + slope * x_centered
             residual = (candidate - fitted).square().sum()
             total = (candidate - candidate.mean()).square().sum().clamp_min(1e-12)
@@ -301,7 +301,7 @@ class LyapunovComplexityEstimator(HydrologyComplexityEstimator):
 def build_hydrology_complexity_estimator(
     kind: str,
     feature_names: tuple[str, ...],
-    **kwargs: object,
+    **kwargs: Any,
 ) -> HydrologyComplexityEstimator:
     if "previous_discharge" not in feature_names:
         raise ValueError("previous_discharge is required for dynamical complexity routing")

@@ -12,26 +12,29 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from pathlib import Path
+from typing import TypedDict
 
 import torch
 
 from .devices import randperm, resolve_device, seeded_generator
-
 from .hydrology import HydrologyRoutedOutput, RoutedHydrologyModel
+from .hydrology_comparison import _add_observation_noise
 from .hydrology_consolidation_comparison import train_hydrology_model_with_consolidation
 from .hydrology_data import HydrologyData, HydrologySplit
 from .hydrology_distillation import train_hydrology_distill_to_simple
 from .hydrology_hard_routing_consolidation_comparison import (
     train_hydrology_model_with_hard_routing_and_consolidation,
 )
-from .hydrology_comparison import _add_observation_noise
 from .ood import MahalanobisOODDetector
 from .stacking import fit_convex_stacking_weight
 
-
 ENSEMBLE_APPROACHES = ("soft_routing", "hard_routing", "distillation")
 AVAILABLE_APPROACHES = (
-    *ENSEMBLE_APPROACHES, "no_routing", "static_50_50", "ood_fallback", "stacking",
+    *ENSEMBLE_APPROACHES,
+    "no_routing",
+    "static_50_50",
+    "ood_fallback",
+    "stacking",
 )
 SUPPORTED_ROUTERS = ("morse", "learned")
 
@@ -65,9 +68,7 @@ class ExtremeComparisonConfig:
     def validate(self) -> None:
         unknown = set(self.approaches) - set(AVAILABLE_APPROACHES)
         if not self.approaches or unknown:
-            raise ValueError(
-                "approaches must contain only: " + ", ".join(AVAILABLE_APPROACHES)
-            )
+            raise ValueError("approaches must contain only: " + ", ".join(AVAILABLE_APPROACHES))
         if self.routing not in SUPPORTED_ROUTERS:
             raise ValueError("routing must be 'morse' or 'learned'")
         if "distillation" in self.approaches and self.routing == "learned":
@@ -180,6 +181,7 @@ def _events(labels: torch.Tensor, dates: tuple[date, ...]) -> list[tuple[int, in
         if positive and start is None:
             start = index
         elif positive and not consecutive:
+            assert start is not None
             result.append((start, index - 1))
             start = index
         elif not positive and start is not None:
@@ -210,12 +212,32 @@ def _runoff_metrics(prediction: torch.Tensor, target: torch.Tensor) -> tuple[flo
     return float(nse), float(kge)
 
 
+class ExtremeMetrics(TypedDict):
+    test_days: int
+    observed_extreme_days: int
+    observed_events: int
+    predicted_events: int
+    precision: float
+    recall: float
+    critical_success_index: float
+    false_alarm_ratio: float
+    average_precision: float
+    event_precision: float
+    event_recall: float
+    nse: float
+    kge: float
+    rmse_mm_day: float
+    extreme_rmse_mm_day: float
+    peak_magnitude_mae_mm_day: float
+    peak_timing_mae_days: float
+
+
 def extreme_metrics(
     prediction: torch.Tensor,
     target: torch.Tensor,
     dates: tuple[date, ...],
     threshold: float,
-) -> dict[str, float | int]:
+) -> ExtremeMetrics:
     """Return daily, event-level, and continuous runoff metrics."""
     prediction = prediction.detach().flatten().cpu().double()
     target = target.detach().flatten().cpu().double()
@@ -227,11 +249,13 @@ def extreme_metrics(
     observed_events = _events(observed, dates)
     predicted_events = _events(predicted, dates)
     detected_observed = [
-        item for item in observed_events
+        item
+        for item in observed_events
         if any(_overlaps(item, candidate) for candidate in predicted_events)
     ]
     detected_predicted = [
-        item for item in predicted_events
+        item
+        for item in predicted_events
         if any(_overlaps(item, candidate) for candidate in observed_events)
     ]
     peak_errors: list[float] = []
@@ -307,36 +331,33 @@ def _train_independent_experts(
         total = 0.0
         permutation = randperm(len(inputs), generator=generator, device=device)
         for start in range(0, len(inputs), config.batch_size):
-            indices = permutation[start:start + config.batch_size]
+            indices = permutation[start : start + config.batch_size]
             noisy = _add_observation_noise(
                 inputs[indices], data.feature_names, config.training_noise, generator
             )
             optimizer.zero_grad()
             complex_prediction = model._positive_discharge(model.complex_expert(noisy))
             complex_loss = (
-                (complex_prediction.squeeze(-1) - targets[indices]).square().mean()
-                + 0.05 * model.physics_residual(
-                    complex_prediction, physical[indices]
-                ).square().mean()
-            )
+                complex_prediction.squeeze(-1) - targets[indices]
+            ).square().mean() + 0.05 * model.physics_residual(
+                complex_prediction, physical[indices]
+            ).square().mean()
             if approach == "no_routing":
                 loss = complex_loss
             else:
                 simple_prediction = model._positive_discharge(model.simple_expert(noisy))
                 simple_loss = (
-                    (simple_prediction.squeeze(-1) - targets[indices]).square().mean()
-                    + 0.05 * model.physics_residual(
-                        simple_prediction, physical[indices]
-                    ).square().mean()
-                )
+                    simple_prediction.squeeze(-1) - targets[indices]
+                ).square().mean() + 0.05 * model.physics_residual(
+                    simple_prediction, physical[indices]
+                ).square().mean()
                 loss = 0.5 * (simple_loss + complex_loss)
             loss.backward()
             optimizer.step()
             total += float(loss.detach()) * len(indices)
         if verbose:
             print(
-                f"  {approach} epoch {epoch + 1}/{config.epochs}: "
-                f"loss={total / len(inputs):.6f}",
+                f"  {approach} epoch {epoch + 1}/{config.epochs}: loss={total / len(inputs):.6f}",
                 flush=True,
             )
 
@@ -377,21 +398,17 @@ def _predict_independent_approach(
                     config.inference_noise,
                     generator,
                 )
-            validation_simple = model._positive_discharge(
-                model.simple_expert(validation_inputs)
-            )
-            validation_complex = model._positive_discharge(
-                model.complex_expert(validation_inputs)
-            )
+            validation_simple = model._positive_discharge(model.simple_expert(validation_inputs))
+            validation_complex = model._positive_discharge(model.complex_expert(validation_inputs))
             fitted_weight, normalized_mse = fit_convex_stacking_weight(
                 validation_simple, validation_complex, data.validation.targets.to(device)
             )
             weight = torch.full((len(inputs),), fitted_weight, device=device)
             stacking_validation_mse = normalized_mse * float(data.discharge_scale.square())
         else:
-            detector = MahalanobisOODDetector(
-                config.ood_quantile, config.ood_shrinkage
-            ).fit(data.train.inputs.to(device))
+            detector = MahalanobisOODDetector(config.ood_quantile, config.ood_shrinkage).fit(
+                data.train.inputs.to(device)
+            )
             scores = detector.score(inputs)
             flags = detector.is_ood(inputs)
             weight = (~flags).to(inputs.dtype)
@@ -426,9 +443,7 @@ def _predict(
     inputs = split.inputs.to(device)
     if inference_noise:
         generator = seeded_generator(device, seed + 300007)
-        inputs = _add_observation_noise(
-            inputs, feature_names, inference_noise, generator
-        )
+        inputs = _add_observation_noise(inputs, feature_names, inference_noise, generator)
     output = model(inputs, hard=hard, return_details=True)
     assert isinstance(output, HydrologyRoutedOutput)
     prediction = output.discharge.squeeze(-1).cpu() * discharge_scale.cpu()
@@ -476,17 +491,22 @@ def _record(
         data.country,
         data.basin_id,
         approach,
-        ({
-            "no_routing": "none",
-            "static_50_50": "fixed",
-            "ood_fallback": "mahalanobis",
-            "stacking": "validation_weighted",
-        }.get(approach, config.routing)
-         if approach not in {"persistence", "seasonal_climatology"} else "none"),
+        (
+            {
+                "no_routing": "none",
+                "static_50_50": "fixed",
+                "ood_fallback": "mahalanobis",
+                "stacking": "validation_weighted",
+            }.get(approach, config.routing)
+            if approach not in {"persistence", "seasonal_climatology"}
+            else "none"
+        ),
         inference_routing,
-        (config.simple_kind
-         if approach not in {"persistence", "seasonal_climatology", "no_routing"}
-         else "none"),
+        (
+            config.simple_kind
+            if approach not in {"persistence", "seasonal_climatology", "no_routing"}
+            else "none"
+        ),
         config.complex_kind if approach not in {"persistence", "seasonal_climatology"} else "none",
         seed,
         config.inference_noise,
@@ -594,9 +614,7 @@ def compare_extreme_event_ensembles(
                 )
                 simple_fraction = report.simple_fraction
             else:
-                _train_independent_experts(
-                    model, data, config, approach, seed, device, verbose
-                )
+                _train_independent_experts(model, data, config, approach, seed, device, verbose)
                 simple_fraction = 0.0 if approach == "no_routing" else 1.0
             elapsed = time.perf_counter() - started
             if approach in {"no_routing", "static_50_50", "ood_fallback", "stacking"}:
@@ -607,11 +625,7 @@ def compare_extreme_event_ensembles(
                     ood_fraction,
                     ood_threshold,
                     stacking_validation_mse,
-                ) = (
-                    _predict_independent_approach(
-                        model, data, config, approach, seed, device
-                    )
-                )
+                ) = _predict_independent_approach(model, data, config, approach, seed, device)
                 inference_routing = {
                     "no_routing": "none",
                     "static_50_50": "fixed_50_50",
@@ -633,7 +647,9 @@ def compare_extreme_event_ensembles(
                 inference_routing = "hard" if hard_inference else "soft"
             if approach in {"no_routing", "static_50_50", "ood_fallback", "stacking"}:
                 active_parameters = [
-                    *model.complex_expert.parameters(), model.raw_response, model.raw_recession
+                    *model.complex_expert.parameters(),
+                    model.raw_response,
+                    model.raw_recession,
                 ]
                 if approach != "no_routing":
                     active_parameters.extend(model.simple_expert.parameters())
@@ -662,9 +678,7 @@ def compare_extreme_event_ensembles(
     return records
 
 
-def save_extreme_ensemble_records(
-    records: list[ExtremeEnsembleRecord], path: str | Path
-) -> None:
+def save_extreme_ensemble_records(records: list[ExtremeEnsembleRecord], path: str | Path) -> None:
     if not records:
         raise ValueError("records must not be empty")
     path = Path(path)

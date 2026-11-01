@@ -4,27 +4,25 @@ import csv
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import mean, stdev
-from typing import Mapping
+from typing import Mapping, Protocol, Sequence
 
 import torch
 from torch import nn
 
 from .devices import as_double, randn, randperm, resolve_device, seeded_generator
-
 from .hydrology import (
     LearnedHydrologyMorsePotential,
     RoutedHydrologyModel,
     SingleComplexHydrologyModel,
     SingleSimpleHydrologyModel,
 )
-from .hydrology_data import HydrologyData, HydrologySplit
 from .hydrology_complexity import (
-    HydrologyComplexityEstimator,
     MODEL_NAMES,
     SCORE_ROUTING_METHODS,
+    HydrologyComplexityEstimator,
     build_hydrology_complexity_estimator,
 )
-
+from .hydrology_data import HydrologyData, HydrologySplit
 
 DYNAMIC_NOISE_FEATURES = {"precipitation", "temperature", "pet", "previous_discharge"}
 
@@ -70,9 +68,7 @@ def _add_observation_noise(
         device=inputs.device,
         dtype=inputs.dtype,
     )[None, None, :]
-    return inputs + noise * randn(
-        inputs.shape, generator=generator, device=inputs.device
-    ) * mask
+    return inputs + noise * randn(inputs.shape, generator=generator, device=inputs.device) * mask
 
 
 def _metrics(prediction: torch.Tensor, target: torch.Tensor) -> tuple[float, float, float]:
@@ -88,7 +84,9 @@ def _metrics(prediction: torch.Tensor, target: torch.Tensor) -> tuple[float, flo
     correlation = covariance / (prediction_std * target_std).clamp_min(1e-12)
     alpha = prediction_std / target_std.clamp_min(1e-12)
     beta = prediction.mean() / target.mean().clamp_min(1e-12)
-    kge = 1.0 - torch.sqrt((correlation - 1.0).square() + (alpha - 1.0).square() + (beta - 1.0).square())
+    kge = 1.0 - torch.sqrt(
+        (correlation - 1.0).square() + (alpha - 1.0).square() + (beta - 1.0).square()
+    )
     return float(nse), float(kge), float(rmse)
 
 
@@ -104,12 +102,18 @@ def _make_model(
     sequence_length = data.train.inputs.shape[1]
     if model_name == "single_complex":
         return SingleComplexHydrologyModel(
-            data.feature_names, sequence_length, data.discharge_scale,
+            data.feature_names,
+            sequence_length,
+            data.discharge_scale,
             complex_kind=complex_kind,
         )
     return RoutedHydrologyModel(
-        data.feature_names, sequence_length, data.discharge_scale,
-        simple_kind=simple_kind, complex_kind=complex_kind, routing=model_name,
+        data.feature_names,
+        sequence_length,
+        data.discharge_scale,
+        simple_kind=simple_kind,
+        complex_kind=complex_kind,
+        routing=model_name,
         learned_morse_potential=learned_morse_potential,
         complexity_percentile=complexity_percentile,
         gate_temperature=gate_temperature,
@@ -320,6 +324,7 @@ def compare_hydrology_models(
                 seed=score_seed,
             )
         return feature_cache[key]
+
     device = resolve_device(device)
     records = []
     for seed in seeds:
@@ -339,9 +344,15 @@ def compare_hydrology_models(
                     gate_temperature,
                 ).to(device)
                 train_hydrology_model(
-                    model, data.train, epochs=epochs, batch_size=batch_size,
-                    learning_rate=learning_rate, training_noise=training_noise,
-                    seed=seed, device=device, feature_names=data.feature_names,
+                    model,
+                    data.train,
+                    epochs=epochs,
+                    batch_size=batch_size,
+                    learning_rate=learning_rate,
+                    training_noise=training_noise,
+                    seed=seed,
+                    device=device,
+                    feature_names=data.feature_names,
                     routing_features=train_features,
                 )
                 for inference_noise in sorted(set(inference_noise_levels)):
@@ -360,31 +371,49 @@ def compare_hydrology_models(
                         seed + 300007,
                     )
                     validation_nse, _, _, _, _ = _evaluate(
-                        model, data.validation, data, inference_noise=inference_noise,
-                        seed=seed + 200003, device=device,
+                        model,
+                        data.validation,
+                        data,
+                        inference_noise=inference_noise,
+                        seed=seed + 200003,
+                        device=device,
                         routing_features=validation_features,
                     )
                     test_nse, test_kge, test_rmse, physics, usage = _evaluate(
-                        model, data.test, data, inference_noise=inference_noise,
-                        seed=seed + 300007, device=device,
+                        model,
+                        data.test,
+                        data,
+                        inference_noise=inference_noise,
+                        seed=seed + 300007,
+                        device=device,
                         routing_features=test_features,
                     )
                     mean_score, valid_fraction = _complexity_diagnostics(test_features)
                     records.append(
                         HydrologyComparisonRecord(
-                            data.country, data.basin_id, model_name,
+                            data.country,
+                            data.basin_id,
+                            model_name,
                             simple_kind if model_name != "single_complex" else "none",
-                            complex_kind, seed, training_noise, inference_noise,
-                            validation_nse, test_nse, test_kge, test_rmse,
-                            physics, _parameter_count(model), usage, mean_score, valid_fraction,
+                            complex_kind,
+                            seed,
+                            training_noise,
+                            inference_noise,
+                            validation_nse,
+                            test_nse,
+                            test_kge,
+                            test_rmse,
+                            physics,
+                            _parameter_count(model),
+                            usage,
+                            mean_score,
+                            valid_fraction,
                         )
                     )
     return records
 
 
-def save_hydrology_comparison(
-    records: list[HydrologyComparisonRecord], path: str | Path
-) -> None:
+def save_hydrology_comparison(records: list[HydrologyComparisonRecord], path: str | Path) -> None:
     if not records:
         raise ValueError("cannot save an empty comparison")
     path = Path(path)
@@ -407,7 +436,8 @@ def hydrology_comparison_summary(records: list[HydrologyComparisonRecord]) -> st
         for training_noise in sorted({record.training_noise for record in records}):
             for inference_noise in sorted({record.inference_noise for record in records}):
                 subset = [
-                    record for record in records
+                    record
+                    for record in records
                     if record.model == model_name
                     and record.training_noise == training_noise
                     and record.inference_noise == inference_noise
@@ -426,16 +456,29 @@ def hydrology_comparison_summary(records: list[HydrologyComparisonRecord]) -> st
     return "\n".join(lines)
 
 
-def plot_hydrology_comparison(
-    records: list[HydrologyComparisonRecord], path: str | Path
-) -> None:
+class ComparisonPlotRecord(Protocol):
+    @property
+    def model(self) -> str: ...
+    @property
+    def training_noise(self) -> float: ...
+    @property
+    def inference_noise(self) -> float: ...
+    @property
+    def country(self) -> str: ...
+    @property
+    def basin(self) -> str: ...
+    @property
+    def complex_expert(self) -> str: ...
+
+
+def plot_hydrology_comparison(records: Sequence[ComparisonPlotRecord], path: str | Path) -> None:
     from .visualization import _finish_figure, _pyplot
 
     model_order = MODEL_NAMES
-    models = tuple(model for model in model_order if any(record.model == model for record in records))
-    conditions = sorted(
-        {(record.training_noise, record.inference_noise) for record in records}
+    models = tuple(
+        model for model in model_order if any(record.model == model for record in records)
     )
+    conditions = sorted({(record.training_noise, record.inference_noise) for record in records})
     plt = _pyplot()
     figure, axes = plt.subplots(1, 3, figsize=(15, 4.5))
     fields = (

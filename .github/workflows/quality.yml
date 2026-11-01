@@ -1,0 +1,39 @@
+name: Python quality
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    env:
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: ensemble_review/pyproject.toml
+      - name: Install package and development dependencies
+        run: python -m pip install -e './ensemble_review[dev,api,animations,tda,kan]'
+      - name: Lint
+        run: python -m ruff check .
+      - name: Check formatting
+        run: python -m ruff format --check .
+      - name: Type check package
+        run: python -m mypy
+      - name: Python regression tests
+        run: python -m pytest -q ensemble_review/tests
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: "22"
+      - name: Studio browser logic tests
+        run: node --test ensemble_review/tests/studio_core.test.mjs

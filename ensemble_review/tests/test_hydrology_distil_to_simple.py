@@ -171,11 +171,24 @@ class HydrologyDistillToSimpleTests(unittest.TestCase):
     def test_robustness_grid_cli_is_accepted(self) -> None:
         args = build_parser().parse_args(
             [
-                "--basins", "2247,2210", "--period", "early:2000-01-01:2009-12-31",
-                "--period", "late:2010-01-01:2020-12-31",
-                "--models", "morse,learned,single_complex", "--seeds", "0,42",
-                "--training-noise-levels", "0,0.1", "--inference-noise-levels", "0,0.25",
-                "--inference-noise-draws", "1", "--epochs", "100",
+                "--basins",
+                "2247,2210",
+                "--period",
+                "early:2000-01-01:2009-12-31",
+                "--period",
+                "late:2010-01-01:2020-12-31",
+                "--models",
+                "morse,learned,single_complex",
+                "--seeds",
+                "0,42",
+                "--training-noise-levels",
+                "0,0.1",
+                "--inference-noise-levels",
+                "0,0.25",
+                "--inference-noise-draws",
+                "1",
+                "--epochs",
+                "100",
             ]
         )
         self.assertEqual(args.basins, "2247,2210")
@@ -184,17 +197,32 @@ class HydrologyDistillToSimpleTests(unittest.TestCase):
 
     def test_final_results_are_aggregated_and_formatted_per_basin(self) -> None:
         first = HydrologyDistillationRecord(
-            country="Test", basin="2247", period="early",
-            period_start="2000-01-01", period_end="2009-12-31",
-            model="morse", training_method="distill_to_simple",
-            simple_expert="rbf", complex_expert="mlp", seed=0,
-            training_noise=0.1, inference_noise=0.25,
-            inference_noise_seed=300007, validation_nse=0.6, test_nse=0.5,
-            test_kge=0.4, test_rmse_mm_day=1.0, physics_error=0.2,
-            parameters=100, mean_complex_weight=0.2,
-            mean_complexity_score=1.0, valid_complexity_fraction=1.0,
-            training_seconds=2.0, complex_epochs=1,
-            distillation_epochs=1, consolidation_epochs=1,
+            country="Test",
+            basin="2247",
+            period="early",
+            period_start="2000-01-01",
+            period_end="2009-12-31",
+            model="morse",
+            training_method="distill_to_simple",
+            simple_expert="rbf",
+            complex_expert="mlp",
+            seed=0,
+            training_noise=0.1,
+            inference_noise=0.25,
+            inference_noise_seed=300007,
+            validation_nse=0.6,
+            test_nse=0.5,
+            test_kge=0.4,
+            test_rmse_mm_day=1.0,
+            physics_error=0.2,
+            parameters=100,
+            mean_complex_weight=0.2,
+            mean_complexity_score=1.0,
+            valid_complexity_fraction=1.0,
+            training_seconds=2.0,
+            complex_epochs=1,
+            distillation_epochs=1,
+            consolidation_epochs=1,
         )
         rows = summarize_basin_results(
             [first, replace(first, seed=42, test_nse=0.7, training_seconds=4.0)]

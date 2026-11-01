@@ -1,4 +1,5 @@
 """Optional daily water states from the existing CAMELS-CH files."""
+
 from __future__ import annotations
 
 import math
@@ -10,11 +11,12 @@ import torch
 
 from .hydrology_data import HydrologySeries, _parse_date, _read_rows
 
-
 CAMELS_CH_STATE_SOURCES = {
     "snow_water_equivalent": ("observation_based", "obs", "swe(mm)"),
     "canopy_interception_storage": (
-        "simulation_based", "sim", "intercept_storage_sim(mm)",
+        "simulation_based",
+        "sim",
+        "intercept_storage_sim(mm)",
     ),
 }
 CAMELS_CH_STATE_FEATURES = tuple(CAMELS_CH_STATE_SOURCES)
@@ -57,13 +59,24 @@ def augment_camels_ch_states(
                             raise ValueError(f"duplicate water-state date in {path}: {day}")
                         values[day] = value
             observations[name] = values
-        external = torch.tensor([
-            [item for name in selected for item in (
-                observations[name].get(day, 0.0), float(day in observations[name]),
-            )] for day in series.dates
-        ], dtype=series.forcings.dtype, device=series.forcings.device)
+        external = torch.tensor(
+            [
+                [
+                    item
+                    for name in selected
+                    for item in (
+                        observations[name].get(day, 0.0),
+                        float(day in observations[name]),
+                    )
+                ]
+                for day in series.dates
+            ],
+            dtype=series.forcings.dtype,
+            device=series.forcings.device,
+        )
         result[basin] = replace(
-            series, forcings=torch.cat((series.forcings, external), dim=1),
+            series,
+            forcings=torch.cat((series.forcings, external), dim=1),
             forcing_names=(*series.forcing_names, *names),
         )
     return result

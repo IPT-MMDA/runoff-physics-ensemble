@@ -10,40 +10,79 @@ from datetime import date
 from pathlib import Path
 from typing import Iterable
 
-from .services import (execute_experiment, validate_optional_dataset, compare_runs,
-                       replay_episodes, prepare_replay, evaluate_scenario)
-from .devices import DEVICE_CHOICES
 from .camels_ch_chem import (
-    CAMELS_CH_CHEM_DYNAMIC_FEATURES, DEFAULT_CAMELS_CH_CHEM_FEATURES,
+    DEFAULT_CAMELS_CH_CHEM_FEATURES,
 )
 from .design import launch_style
 from .design.config_help import config_info
 from .design.dataset_help import dataset_info
+from .devices import DEVICE_CHOICES
 from .estreams import ESTREAMS_DYNAMIC_FEATURES
-from .hyd_responses import HYDResponses, DEFAULT_HYD_RESPONSES_FEATURES
+from .hyd_responses import DEFAULT_HYD_RESPONSES_FEATURES, HYDResponses
 from .hydropower import (
-    default_hydropower_path, ensure_hydropower_gpkg, load_hydropower_sites,
-    prepare_hydropower_forecast, hydropower_map_payload, hydropower_table_rows,
+    default_hydropower_path,
+    ensure_hydropower_gpkg,
+    hydropower_map_payload,
+    hydropower_table_rows,
+    load_hydropower_sites,
     load_saved_run_predictions,
+    prepare_hydropower_forecast,
 )
 from .paved_scenario import PavedSiteConfig
 from .rainfall_replay import (
-    export_gif, forecast_snapshot, replay_figures,
+    export_gif,
+    forecast_snapshot,
+    replay_figures,
 )
 from .regional import (
-    BasinScopeConfig, CAMELSCHCatalog, CancellationToken, DateRange, DateSplitConfig,
-    ExtremeEventConfig, ForecastConfig, HyperparameterConfig, ModelArchitectureConfig,
-    PhysicsModelConfig, RegionalExperimentConfig, TrainingStrategyConfig,
+    BasinScopeConfig,
+    CAMELSCHCatalog,
+    CancellationToken,
+    DateRange,
+    DateSplitConfig,
+    ExtremeEventConfig,
+    ForecastConfig,
+    HyperparameterConfig,
+    ModelArchitectureConfig,
+    PhysicsModelConfig,
+    RegionalExperimentConfig,
+    TrainingStrategyConfig,
 )
 from .result_registry import (
-    DEFAULT_RESULTS_DIRECTORY, FILTER_FIELDS, available_values, discover_runs,
-    filter_runs, leaderboard_rows, parse_bool, save_run,
+    DEFAULT_RESULTS_DIRECTORY,
+    FILTER_FIELDS,
+    available_values,
+    discover_runs,
+    filter_runs,
+    leaderboard_rows,
+    parse_bool,
+    save_run,
+)
+from .services import (
+    compare_runs,
+    evaluate_scenario,
+    execute_experiment,
+    prepare_replay,
+    replay_episodes,
+    validate_optional_dataset,
 )
 
-
 DEFAULT_BASINS = (
-    "4009", "4008", "2488", "2109", "2011", "2126", "5001", "2247",
-    "4022", "4023", "5009", "5010", "5016", "3014", "3015",
+    "4009",
+    "4008",
+    "2488",
+    "2109",
+    "2011",
+    "2126",
+    "5001",
+    "2247",
+    "4022",
+    "4023",
+    "5009",
+    "5010",
+    "5016",
+    "3014",
+    "3015",
 )
 
 
@@ -292,29 +331,37 @@ class BasinMapComponent:
             result.append(basin_id)
         return result
 
-    def payload(self, selected: Iterable[str] = (), active: str | None = None,
-                training: Iterable[str] = (), future: bool = False,
-                interaction: str = "none") -> dict[str, object]:
+    def payload(
+        self,
+        selected: Iterable[str] = (),
+        active: str | None = None,
+        training: Iterable[str] = (),
+        future: bool = False,
+        interaction: str = "none",
+    ) -> dict[str, object]:
         """Return the serializable state consumed by the browser map."""
         features = []
         records = sorted(
             (record for record in self.catalog.records if record.geometry is not None),
-            key=lambda record: getattr(record.geometry, "area", 0.0), reverse=True,
+            key=lambda record: getattr(record.geometry, "area", 0.0),
+            reverse=True,
         )
         for record in records:
             interface = getattr(record.geometry, "__geo_interface__", None)
             if interface is None:
                 continue
-            features.append({
-                "type": "Feature",
-                "id": record.basin_id,
-                "properties": {
-                    "basin_id": record.basin_id,
-                    "name": record.name,
-                    "eligible": record.eligible,
-                },
-                "geometry": interface,
-            })
+            features.append(
+                {
+                    "type": "Feature",
+                    "id": record.basin_id,
+                    "properties": {
+                        "basin_id": record.basin_id,
+                        "name": record.name,
+                        "eligible": record.eligible,
+                    },
+                    "geometry": interface,
+                }
+            )
         return {
             "geojson": {"type": "FeatureCollection", "features": features},
             "eligible": list(self.catalog.eligible_ids),
@@ -325,10 +372,17 @@ class BasinMapComponent:
             "interaction": interaction,
         }
 
-    def gradio_component(self, gr, *, selected: Iterable[str] = (),
-                         active: str | None = None, training: Iterable[str] = (),
-                         future: bool = False, interaction: str = "none",
-                         label: str | None = None):
+    def gradio_component(
+        self,
+        gr,
+        *,
+        selected: Iterable[str] = (),
+        active: str | None = None,
+        training: Iterable[str] = (),
+        future: bool = False,
+        interaction: str = "none",
+        label: str | None = None,
+    ):
         """Create a Gradio 6 HTML component backed by a Leaflet vector map."""
         return gr.HTML(
             value=self.payload(selected, active, training, future, interaction),
@@ -343,48 +397,77 @@ class BasinMapComponent:
             padding=False,
         )
 
-    def svg(self, selected: Iterable[str] = (), active: str | None = None,
-            training: Iterable[str] = (), future: bool = False) -> str:
+    def svg(
+        self,
+        selected: Iterable[str] = (),
+        active: str | None = None,
+        training: Iterable[str] = (),
+        future: bool = False,
+    ) -> str:
         selected, training = set(map(str, selected)), set(map(str, training))
-        geometries = [(record, record.geometry) for record in self.catalog.records
-                      if record.geometry is not None and hasattr(record.geometry, "bounds")]
+        geometries = [
+            (record, record.geometry)
+            for record in self.catalog.records
+            if record.geometry is not None and hasattr(record.geometry, "bounds")
+        ]
         if not geometries:
             labels = "".join(
-                f'<text x="10" y="{22 + index*18}" data-basin="{html.escape(record.basin_id)}">'
-                f'{html.escape(record.basin_id)} — {html.escape(record.name)}</text>'
+                f'<text x="10" y="{22 + index * 18}" data-basin="{html.escape(record.basin_id)}">'
+                f"{html.escape(record.basin_id)} — {html.escape(record.name)}</text>"
                 for index, record in enumerate(self.catalog.records[:25])
             )
             return f'<svg viewBox="0 0 500 480" role="img" aria-label="CAMELS-CH basin map">{labels}</svg>'
-        minx = min(shape.bounds[0] for _, shape in geometries); miny = min(shape.bounds[1] for _, shape in geometries)
-        maxx = max(shape.bounds[2] for _, shape in geometries); maxy = max(shape.bounds[3] for _, shape in geometries)
-        scale = min(760/max(maxx-minx, 1e-9), 480/max(maxy-miny, 1e-9))
+        minx = min(shape.bounds[0] for _, shape in geometries)
+        miny = min(shape.bounds[1] for _, shape in geometries)
+        maxx = max(shape.bounds[2] for _, shape in geometries)
+        maxy = max(shape.bounds[3] for _, shape in geometries)
+        scale = min(760 / max(maxx - minx, 1e-9), 480 / max(maxy - miny, 1e-9))
         paths = []
         for record, shape in geometries:
             polygons = getattr(shape, "geoms", (shape,))
             commands = []
             for polygon in polygons:
                 exterior = getattr(polygon, "exterior", None)
-                if exterior is None: continue
-                points = [((x-minx)*scale+10, 500-(y-miny)*scale) for x, y in exterior.coords]
-                commands.append("M " + " L ".join(f"{x:.2f},{y:.2f}" for x,y in points) + " Z")
+                if exterior is None:
+                    continue
+                points = [
+                    ((x - minx) * scale + 10, 500 - (y - miny) * scale) for x, y in exterior.coords
+                ]
+                commands.append("M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in points) + " Z")
             if future:
                 color = "#059669" if record.basin_id in selected else "#d1d5db"
             else:
-                color = "#16a34a" if record.basin_id in training else ("#f59e0b" if record.basin_id in selected else "#d1d5db")
+                color = (
+                    "#16a34a"
+                    if record.basin_id in training
+                    else ("#f59e0b" if record.basin_id in selected else "#d1d5db")
+                )
             width = 3 if record.basin_id == active else 1
             stroke = "#065f46" if record.basin_id == active else "#334155"
-            paths.append(f'<path d="{" ".join(commands)}" fill="{color}" stroke="{stroke}" stroke-width="{width}" data-basin="{html.escape(record.basin_id)}"><title>{html.escape(record.basin_id)} — {html.escape(record.name)}</title></path>')
-        return '<svg viewBox="0 0 800 520" role="img" aria-label="CAMELS-CH basin map" style="width:100%;max-height:520px">' + "".join(paths) + '</svg>'
+            paths.append(
+                f'<path d="{" ".join(commands)}" fill="{color}" stroke="{stroke}" stroke-width="{width}" data-basin="{html.escape(record.basin_id)}"><title>{html.escape(record.basin_id)} — {html.escape(record.name)}</title></path>'
+            )
+        return (
+            '<svg viewBox="0 0 800 520" role="img" aria-label="CAMELS-CH basin map" style="width:100%;max-height:520px">'
+            + "".join(paths)
+            + "</svg>"
+        )
 
 
 def _parse_seeds(value: str) -> tuple[int, ...]:
-    try: return tuple(int(item.strip()) for item in value.split(",") if item.strip())
-    except ValueError as error: raise ValueError("seeds must be comma-separated integers") from error
+    try:
+        return tuple(int(item.strip()) for item in value.split(",") if item.strip())
+    except ValueError as error:
+        raise ValueError("seeds must be comma-separated integers") from error
 
 
 def _config_from_ui_values(
-    data_root: str | Path, target_values, scope_value, values,
-    *, estreams_root: str | Path | None = None,
+    data_root: str | Path,
+    target_values,
+    scope_value,
+    values,
+    *,
+    estreams_root: str | Path | None = None,
     camels_chem_root: str | Path | None = None,
     hyd_responses_root: str | Path | None = None,
 ):
@@ -394,7 +477,7 @@ def _config_from_ui_values(
         use_estreams = bool(values[48])
         ui_estreams_root = str(values[49] or "").strip()
         selected_estreams_features = tuple(values[50] or ())
-        resolved_estreams_root = ui_estreams_root if use_estreams else None
+        resolved_estreams_root: str | Path | None = ui_estreams_root if use_estreams else None
     else:
         resolved_estreams_root = estreams_root
         selected_estreams_features = ESTREAMS_DYNAMIC_FEATURES
@@ -402,27 +485,44 @@ def _config_from_ui_values(
         use_chem = bool(values[51])
         ui_chem_root = str(values[52] or "").strip()
         selected_chem_features = tuple(values[53] or ())
-        resolved_chem_root = ui_chem_root if use_chem else None
+        resolved_chem_root: str | Path | None = ui_chem_root if use_chem else None
     else:
         resolved_chem_root = camels_chem_root
         selected_chem_features = DEFAULT_CAMELS_CH_CHEM_FEATURES
     return RegionalExperimentConfig(
         data_root,
         BasinScopeConfig(tuple(target_values or ()), scope_value),
-        DateSplitConfig(DateRange(values[0], values[1]), DateRange(values[2], values[3]),
-                        DateRange(values[4], values[5])),
+        DateSplitConfig(
+            DateRange(values[0], values[1]),
+            DateRange(values[2], values[3]),
+            DateRange(values[4], values[5]),
+        ),
         ModelArchitectureConfig(
-            complex_expert=values[7], simple_expert=values[8], mlp_widths=widths,
-            mamba_hidden_size=int(values[23]), mamba_layers=int(values[24]),
-            mamba_feed_forward_size=int(values[25]), rbf_centers=int(values[26]),
+            complex_expert=values[7],
+            simple_expert=values[8],
+            mlp_widths=widths,
+            mamba_hidden_size=int(values[23]),
+            mamba_layers=int(values[24]),
+            mamba_feed_forward_size=int(values[25]),
+            rbf_centers=int(values[26]),
             fourier_frequencies=int(values[27]),
         ),
-        TrainingStrategyConfig(values[6], int(values[9]), int(values[19]),
-                               int(values[20]), int(values[21])),
+        TrainingStrategyConfig(
+            values[6], int(values[9]), int(values[19]), int(values[20]), int(values[21])
+        ),
         HyperparameterConfig(
-            int(values[10]), _parse_seeds(values[11]), int(values[12]), float(values[13]),
-            float(values[14]), float(values[15]), float(values[16]), float(values[17]),
-            float(values[18]), float(values[29]), float(values[30]), values[31],
+            int(values[10]),
+            _parse_seeds(values[11]),
+            int(values[12]),
+            float(values[13]),
+            float(values[14]),
+            float(values[15]),
+            float(values[16]),
+            float(values[17]),
+            float(values[18]),
+            float(values[29]),
+            float(values[30]),
+            values[31],
             float(values[34]) if len(values) > 34 else 0.99,
             float(values[35]) if len(values) > 35 else 0.1,
             complexity_method=values[64] if len(values) > 64 else "morse",
@@ -437,7 +537,8 @@ def _config_from_ui_values(
         ),
         PhysicsModelConfig(),
         ExtremeEventConfig(
-            values[28], values[32],
+            values[28],
+            values[32],
             float(values[33]) if values[33] is not None else None,
             event_types=tuple(values[56]) if len(values) > 56 else ExtremeEventConfig().event_types,
             high_quantile=float(values[57]) if len(values) > 57 else 0.8,
@@ -459,8 +560,11 @@ def _config_from_ui_values(
         camels_chem_features=selected_chem_features,
         camels_state_features=tuple(values[73] or ()) if len(values) > 73 else (),
         hyd_responses_root=(str(values[75] or "").strip() if values[74] else None)
-                           if len(values) > 77 else hyd_responses_root,
-        hyd_responses_features=tuple(values[76] or ()) if len(values) > 77 else DEFAULT_HYD_RESPONSES_FEATURES,
+        if len(values) > 77
+        else hyd_responses_root,
+        hyd_responses_features=tuple(values[76] or ())
+        if len(values) > 77
+        else DEFAULT_HYD_RESPONSES_FEATURES,
         hyd_responses_static=bool(values[77]) if len(values) > 77 else False,
         forecast=ForecastConfig(
             mode=values[54] if len(values) > 54 else "one_day",
@@ -489,13 +593,21 @@ def build_app(
         raise RuntimeError("Gradio is required to build the application") from error
     catalog = CAMELSCHCatalog(data_root)
     map_component = BasinMapComponent(catalog)
-    choices = [(f"{item.basin_id} — {item.name}", item.basin_id) for item in catalog.records if item.eligible]
+    choices = [
+        (f"{item.basin_id} — {item.name}", item.basin_id)
+        for item in catalog.records
+        if item.eligible
+    ]
     eligible = set(catalog.eligible_ids)
     default_basins = [basin for basin in DEFAULT_BASINS if basin in eligible]
     results_dir = Path(results_dir)
     snapshot = discover_runs(results_dir)
     saved_runs = list(snapshot.runs)
-    hydropower_path = Path(hydropower_path).expanduser().resolve() if hydropower_path else default_hydropower_path()
+    hydropower_path = (
+        Path(hydropower_path).expanduser().resolve()
+        if hydropower_path
+        else default_hydropower_path()
+    )
     hydropower_sites = None
     hydropower_load_message = ""
     try:
@@ -517,61 +629,99 @@ def build_app(
             f"Check the `hydropower` settings in api-server.json. Details: {error}"
         )
 
-    with gr.Blocks(title="Regional hydrology and land assessment platform with heterogeneous ensembles") as app:
+    with gr.Blocks(
+        title="Regional hydrology and land assessment platform with heterogeneous ensembles"
+    ) as app:
         # Reserve the retired fields' positions in the existing UI adapter;
         # these are constant internal values, with no controls or training effect.
         retired_physics_slots = [gr.State(None) for _ in range(12)]
         token_state = gr.State(None)
         experiment_state = gr.State(None)
-        gr.Markdown("# Regional hydrology and land assessment platform with heterogeneous ensembles")
+        gr.Markdown(
+            "# Regional hydrology and land assessment platform with heterogeneous ensembles"
+        )
         with gr.Tab("Target basins"):
             basin_map = map_component.gradio_component(
-                gr, selected=default_basins, future=True, interaction="toggle",
+                gr,
+                selected=default_basins,
+                future=True,
+                interaction="toggle",
                 label="Select prediction targets on the map",
             )
             targets = gr.Dropdown(
-                choices=choices, value=default_basins, multiselect=True,
+                choices=choices,
+                value=default_basins,
+                multiselect=True,
                 label="Prediction targets",
             )
             with gr.Row():
-                select_all = gr.Button("Select all eligible"); clear = gr.Button("Clear")
-            scope = gr.Radio([
-                ("All eligible except targets", "exclude_targets"),
-                ("All eligible (targets included)", "all_basins"),
-                ("Only selected targets", "targets_only"),
-            ], value="all_basins", label="Model-training basins")
-            eligibility = gr.Dataframe(headers=["basin_id", "name", "eligible"],
-                value=[[x.basin_id, x.name, x.eligible] for x in catalog.records], interactive=False)
+                select_all = gr.Button("Select all eligible")
+                clear = gr.Button("Clear")
+            scope = gr.Radio(
+                [
+                    ("All eligible except targets", "exclude_targets"),
+                    ("All eligible (targets included)", "all_basins"),
+                    ("Only selected targets", "targets_only"),
+                ],
+                value="all_basins",
+                label="Model-training basins",
+            )
+            gr.Dataframe(
+                headers=["basin_id", "name", "eligible"],
+                value=[[x.basin_id, x.name, x.eligible] for x in catalog.records],
+                interactive=False,
+            )
         with gr.Tab("Experiment configuration"):
             with gr.Row():
                 gr.Markdown("### Date ranges")
                 config_info(gr, "dates")
             with gr.Row():
-                train_start=gr.Textbox("2010-01-01",label="Train start"); train_end=gr.Textbox("2016-08-06",label="Train end")
-                val_start=gr.Textbox("2016-08-07",label="Validation start"); val_end=gr.Textbox("2018-10-18",label="Validation end")
-                test_start=gr.Textbox("2018-10-19",label="Test start"); test_end=gr.Textbox("2020-12-31",label="Test end")
+                train_start = gr.Textbox("2010-01-01", label="Train start")
+                train_end = gr.Textbox("2016-08-06", label="Train end")
+                val_start = gr.Textbox("2016-08-07", label="Validation start")
+                val_end = gr.Textbox("2018-10-18", label="Validation end")
+                test_start = gr.Textbox("2018-10-19", label="Test start")
+                test_end = gr.Textbox("2020-12-31", label="Test end")
             with gr.Row():
-                approach=gr.Radio([
-                    ("Soft routing","soft_routing"),
-                    ("Hard routing","hard_routing"),
-                    ("Distillation","distillation"),
-                    ("No routing — complex only","no_routing"),
-                    ("Static 50/50 — independently trained","static_50_50"),
-                    ("OOD fallback — simple when OOD","ood_fallback"),
-                    ("Stacking — validation-optimized blend","stacking"),
-                ],value="soft_routing",label="Approach")
+                approach = gr.Radio(
+                    [
+                        ("Soft routing", "soft_routing"),
+                        ("Hard routing", "hard_routing"),
+                        ("Distillation", "distillation"),
+                        ("No routing — complex only", "no_routing"),
+                        ("Static 50/50 — independently trained", "static_50_50"),
+                        ("OOD fallback — simple when OOD", "ood_fallback"),
+                        ("Stacking — validation-optimized blend", "stacking"),
+                    ],
+                    value="soft_routing",
+                    label="Approach",
+                )
                 config_info(gr, "approach")
             with gr.Row():
-                complex_expert=gr.Radio([("Mamba","pinnmamba"),("MLP","mlp")],value="pinnmamba",label="Complex expert")
+                complex_expert = gr.Radio(
+                    [("Mamba", "pinnmamba"), ("MLP", "mlp")],
+                    value="pinnmamba",
+                    label="Complex expert",
+                )
                 config_info(gr, "complex_expert")
             with gr.Row():
-                simple_expert=gr.Radio([("RBF","rbf"),("Fourier","fourier")],value="rbf",label="Simple expert")
+                simple_expert = gr.Radio(
+                    [("RBF", "rbf"), ("Fourier", "fourier")], value="rbf", label="Simple expert"
+                )
                 config_info(gr, "simple_expert")
             with gr.Row():
-                gr.Dropdown([("Linear reservoir water balance","linear_reservoir")],value="linear_reservoir",label="Physics backbone",interactive=False)
+                gr.Dropdown(
+                    [("Linear reservoir water balance", "linear_reservoir")],
+                    value="linear_reservoir",
+                    label="Physics backbone",
+                    interactive=False,
+                )
                 config_info(gr, "physics_backbone")
         from .kan_case_study_ui import build_case_study_tab
-        build_case_study_tab(gr, catalog, choices, results_dir / "kan_case_study", executor=executor)
+
+        build_case_study_tab(
+            gr, catalog, choices, results_dir / "kan_case_study", executor=executor
+        )
         with gr.Tab("Data and features"):
             gr.Markdown(
                 "CAMELS-CH daily hydrology is the required base dataset. Optional datasets "
@@ -673,16 +823,23 @@ def build_app(
             )
             hyd_responses_features = gr.CheckboxGroup(
                 choices=[
-                    *[(f"Soil moisture: layer {i} (m³/m³, ERA5-Land)", f"hyd_soil_moisture_layer_{i}")
-                      for i in range(1, 5)],
+                    *[
+                        (
+                            f"Soil moisture: layer {i} (m³/m³, ERA5-Land)",
+                            f"hyd_soil_moisture_layer_{i}",
+                        )
+                        for i in range(1, 5)
+                    ],
                     ("Snowmelt contributing to runoff (mm/day, OSHD)", "hyd_snowmelt_oshd"),
                     ("Snow water equivalent (mm, OSHD)", "hyd_swe_oshd"),
                     ("Snow water equivalent (mm, SPASS)", "hyd_swe_spass"),
-                ], value=list(DEFAULT_HYD_RESPONSES_FEATURES),
+                ],
+                value=list(DEFAULT_HYD_RESPONSES_FEATURES),
                 label="HYD-RESPONSES water-state features",
             )
             hyd_responses_static = gr.Checkbox(
-                False, label="Include HYD-RESPONSES physical catchment descriptors",
+                False,
+                label="Include HYD-RESPONSES physical catchment descriptors",
             )
             gr.Markdown(
                 "Matches existing basin IDs. Missing dates or unmatched basins are marked "
@@ -710,8 +867,14 @@ def build_app(
             replay_show = gr.Button("Show replay", variant="primary")
             replay_status = gr.Markdown("Run an experiment to load a replay.")
             replay_inputs = gr.Markdown()
-            replay_day = gr.Slider(minimum=1, maximum=14, step=1, value=1,
-                                   label="Predicted day (1–14)", interactive=False)
+            replay_day = gr.Slider(
+                minimum=1,
+                maximum=14,
+                step=1,
+                value=1,
+                label="Predicted day (1–14)",
+                interactive=False,
+            )
             replay_weather = gr.Plot(label="1 · Historical weather")
             replay_discharge = gr.Plot(label="2 · Discharge at the gauge")
             replay_bucket = gr.Plot(label="3 · Teaching bucket")
@@ -723,15 +886,20 @@ def build_app(
         with gr.Tab("Training hyperparameters"):
             with gr.Row():
                 complexity_method = gr.Dropdown(
-                    [("Morse — wetness / flow gradient", "morse"),
-                     ("PH — persistent loops", "ph"),
-                     ("Takens — embedding effective dimension", "takens"),
-                     ("Lyapunov — trajectory divergence", "lyapunov")],
-                    value="morse", label="Complexity routing method",
+                    [
+                        ("Morse — wetness / flow gradient", "morse"),
+                        ("PH — persistent loops", "ph"),
+                        ("Takens — embedding effective dimension", "takens"),
+                        ("Lyapunov — trajectory divergence", "lyapunov"),
+                    ],
+                    value="morse",
+                    label="Complexity routing method",
                     info="Used by soft routing, hard routing, and distillation. Other approaches ignore this choice.",
                 )
                 config_info(gr, "complexity_method")
-            with gr.Accordion("Discharge-history complexity settings", open=True, visible=False) as complexity_settings:
+            with gr.Accordion(
+                "Discharge-history complexity settings", open=True, visible=False
+            ) as complexity_settings:
                 with gr.Row():
                     routing_context = gr.Number(365, precision=0, label="Routing history (days)")
                     embedding_dim = gr.Number(3, precision=0, label="Embedding dimension")
@@ -740,88 +908,138 @@ def build_app(
                     ph_min_persistence = gr.Number(0.1, label="Minimum loop persistence")
                     ph_score = gr.Dropdown(
                         ["total_persistence", "persistent_holes", "persistence_entropy"],
-                        value="total_persistence", label="PH score",
+                        value="total_persistence",
+                        label="PH score",
                     )
                 with gr.Row(visible=False) as lyapunov_settings:
                     lyapunov_theiler = gr.Number(30, precision=0, label="Neighbor exclusion (days)")
                     lyapunov_horizon = gr.Number(20, precision=0, label="Divergence fit steps")
                     lyapunov_r2 = gr.Number(0.8, label="Minimum divergence fit R²")
             complexity_method.change(
-                lambda method: (gr.update(visible=method != "morse"),
-                                gr.update(visible=method == "ph"),
-                                gr.update(visible=method == "lyapunov")),
+                lambda method: (
+                    gr.update(visible=method != "morse"),
+                    gr.update(visible=method == "ph"),
+                    gr.update(visible=method == "lyapunov"),
+                ),
                 inputs=complexity_method,
                 outputs=[complexity_settings, ph_settings, lyapunov_settings],
             )
             with gr.Row():
-                sequence=gr.Number(30,precision=0,label="Sequence length"); seeds=gr.Textbox("0",label="Seeds")
-                epochs=gr.Number(20,precision=0,label="Epochs"); batch=gr.Number(64,precision=0,label="Batch size")
-                learning_rate=gr.Number(1e-3,label="Learning rate"); noise=gr.Number(0.0,label="Training noise")
+                sequence = gr.Number(30, precision=0, label="Sequence length")
+                seeds = gr.Textbox("0", label="Seeds")
+                epochs = gr.Number(20, precision=0, label="Epochs")
+                batch = gr.Number(64, precision=0, label="Batch size")
+                learning_rate = gr.Number(1e-3, label="Learning rate")
+                noise = gr.Number(0.0, label="Training noise")
             with gr.Row():
-                percentile=gr.Number(80,label="Complexity percentile"); temperature=gr.Number(.15,label="Gate temperature")
-                physics_weight=gr.Number(.05,label="Physics weight"); interface_weight=gr.Number(.05,label="Interface weight")
-                routing_weight=gr.Number(.2,label="Routing weight"); compute_weight=gr.Number(0,label="Compute weight")
-            device=gr.Radio(list(DEVICE_CHOICES),value="auto",label="Device")
-            with gr.Accordion("Approach and architecture controls",open=False):
-                teacher_epochs=gr.Number(120,precision=0,label="Complex-teacher epochs")
-                distill_epochs=gr.Number(120,precision=0,label="Distillation epochs")
-                consolidation_epochs=gr.Number(120,precision=0,label="Consolidation epochs")
-                mlp_widths=gr.Textbox("64,64",label="MLP widths")
-                mamba_hidden=gr.Number(16,precision=0,label="Mamba hidden size"); mamba_layers=gr.Number(1,precision=0,label="Mamba layers")
-                mamba_ff=gr.Number(64,precision=0,label="Mamba feed-forward size")
-                rbf_centers=gr.Number(32,precision=0,label="RBF centers"); fourier_frequencies=gr.Number(32,precision=0,label="Fourier frequencies")
-                ood_quantile=gr.Number(.99,label="OOD training-score quantile")
-                ood_shrinkage=gr.Number(.1,label="OOD covariance shrinkage")
+                percentile = gr.Number(80, label="Complexity percentile")
+                temperature = gr.Number(0.15, label="Gate temperature")
+                physics_weight = gr.Number(0.05, label="Physics weight")
+                interface_weight = gr.Number(0.05, label="Interface weight")
+                routing_weight = gr.Number(0.2, label="Routing weight")
+                compute_weight = gr.Number(0, label="Compute weight")
+            device = gr.Radio(list(DEVICE_CHOICES), value="auto", label="Device")
+            with gr.Accordion("Approach and architecture controls", open=False):
+                teacher_epochs = gr.Number(120, precision=0, label="Complex-teacher epochs")
+                distill_epochs = gr.Number(120, precision=0, label="Distillation epochs")
+                consolidation_epochs = gr.Number(120, precision=0, label="Consolidation epochs")
+                mlp_widths = gr.Textbox("64,64", label="MLP widths")
+                mamba_hidden = gr.Number(16, precision=0, label="Mamba hidden size")
+                mamba_layers = gr.Number(1, precision=0, label="Mamba layers")
+                mamba_ff = gr.Number(64, precision=0, label="Mamba feed-forward size")
+                rbf_centers = gr.Number(32, precision=0, label="RBF centers")
+                fourier_frequencies = gr.Number(32, precision=0, label="Fourier frequencies")
+                ood_quantile = gr.Number(0.99, label="OOD training-score quantile")
+                ood_shrinkage = gr.Number(0.1, label="OOD covariance shrinkage")
         with gr.Tab("Task"):
-            extreme_mode=gr.Radio([
-                ("Daily discharge forecasting", "none"),
-                ("Daily discharge + statistical extreme-event evaluation", "statistical"),
-                ("Daily discharge + hydrological event evaluation", "event_based"),
-                ("Hydrological drought (HYD-RESPONSES-style definitions)", "drought"),
-            ],value="none",label="Analysis task")
-            definition=gr.Radio([("Automatic per-basin Q95","automatic_q95"),("Manual absolute discharge","absolute"),("Manual quantile","quantile")],value="automatic_q95",label="Definition")
-            extreme_value=gr.Number(value=.95,label="Global value")
+            extreme_mode = gr.Radio(
+                [
+                    ("Daily discharge forecasting", "none"),
+                    ("Daily discharge + statistical extreme-event evaluation", "statistical"),
+                    ("Daily discharge + hydrological event evaluation", "event_based"),
+                    ("Hydrological drought (HYD-RESPONSES-style definitions)", "drought"),
+                ],
+                value="none",
+                label="Analysis task",
+            )
+            definition = gr.Radio(
+                [
+                    ("Automatic per-basin Q95", "automatic_q95"),
+                    ("Manual absolute discharge", "absolute"),
+                    ("Manual quantile", "quantile"),
+                ],
+                value="automatic_q95",
+                label="Definition",
+            )
+            extreme_value = gr.Number(value=0.95, label="Global value")
             gr.Markdown(
                 "The definition and global value above apply to statistical extremes. Per-basin overrides "
                 "remain available through the Python service API."
             )
             with gr.Accordion("Hydrological event definitions", open=False):
-                event_types=gr.CheckboxGroup([
-                    ("Sustained high flow", "high_flow_spell"),
-                    ("Low-flow drought", "low_flow_spell"),
-                    ("Rapid daily rise", "rapid_rise"),
-                    ("Rapid daily fall", "rapid_fall"),
-                    ("Repeated high-flow pulses", "repeated_high_flow"),
-                    ("Concurrent high flow across basins", "regional_concurrence"),
-                    ("Concurrent low flow across basins", "regional_low_flow"),
-                ], value=["high_flow_spell", "low_flow_spell", "rapid_rise",
-                          "rapid_fall", "repeated_high_flow", "regional_concurrence",
-                          "regional_low_flow"],
-                   label="Event types")
+                event_types = gr.CheckboxGroup(
+                    [
+                        ("Sustained high flow", "high_flow_spell"),
+                        ("Low-flow drought", "low_flow_spell"),
+                        ("Rapid daily rise", "rapid_rise"),
+                        ("Rapid daily fall", "rapid_fall"),
+                        ("Repeated high-flow pulses", "repeated_high_flow"),
+                        ("Concurrent high flow across basins", "regional_concurrence"),
+                        ("Concurrent low flow across basins", "regional_low_flow"),
+                    ],
+                    value=[
+                        "high_flow_spell",
+                        "low_flow_spell",
+                        "rapid_rise",
+                        "rapid_fall",
+                        "repeated_high_flow",
+                        "regional_concurrence",
+                        "regional_low_flow",
+                    ],
+                    label="Event types",
+                )
                 with gr.Row():
-                    high_quantile=gr.Number(.8, label="High-flow training quantile")
-                    low_quantile=gr.Number(.2, label="Low-flow training quantile")
-                    rise_quantile=gr.Number(.95, label="Daily-rise training quantile")
-                    fall_quantile=gr.Number(.95, label="Daily-fall training quantile")
+                    high_quantile = gr.Number(0.8, label="High-flow training quantile")
+                    low_quantile = gr.Number(0.2, label="Low-flow training quantile")
+                    rise_quantile = gr.Number(0.95, label="Daily-rise training quantile")
+                    fall_quantile = gr.Number(0.95, label="Daily-fall training quantile")
                 with gr.Row():
-                    minimum_days=gr.Number(3, precision=0, label="Minimum spell days")
-                    pulse_gap_days=gr.Number(7, precision=0, label="Maximum gap between pulses (days)")
-                    minimum_basins=gr.Number(2, precision=0, label="Minimum concurrent basins")
-                gr.Markdown("Thresholds are estimated from each basin's training-period observations. "
-                            "Rapid rise uses day-to-day discharge change; regional events need enough selected basins.")
-            with gr.Accordion("Drought definition and verification", open=True, visible=False) as drought_panel:
-                drought_definition = gr.Radio([
-                    ("Seasonal low-flow percentile", "seasonal_quantile"),
-                    ("Fixed Q347 estimate", "q347"),
-                ], value="seasonal_quantile", label="Drought threshold")
-                drought_smoothing = gr.Radio([
-                    ("Trailing seven-day mean (causal adaptation)", "trailing"),
-                    ("Centred seven-day mean (HYD-RESPONSES smoothing)", "centered"),
-                ], value="trailing", label="Discharge smoothing")
+                    minimum_days = gr.Number(3, precision=0, label="Minimum spell days")
+                    pulse_gap_days = gr.Number(
+                        7, precision=0, label="Maximum gap between pulses (days)"
+                    )
+                    minimum_basins = gr.Number(2, precision=0, label="Minimum concurrent basins")
+                gr.Markdown(
+                    "Thresholds are estimated from each basin's training-period observations. "
+                    "Rapid rise uses day-to-day discharge change; regional events need enough selected basins."
+                )
+            with gr.Accordion(
+                "Drought definition and verification", open=True, visible=False
+            ) as drought_panel:
+                drought_definition = gr.Radio(
+                    [
+                        ("Seasonal low-flow percentile", "seasonal_quantile"),
+                        ("Fixed Q347 estimate", "q347"),
+                    ],
+                    value="seasonal_quantile",
+                    label="Drought threshold",
+                )
+                drought_smoothing = gr.Radio(
+                    [
+                        ("Trailing seven-day mean (causal adaptation)", "trailing"),
+                        ("Centred seven-day mean (HYD-RESPONSES smoothing)", "centered"),
+                    ],
+                    value="trailing",
+                    label="Discharge smoothing",
+                )
                 with gr.Row():
-                    drought_quantile = gr.Number(.15, label="Seasonal training quantile (0–1)")
-                    drought_calendar_window = gr.Number(31, precision=0, label="Seasonal calendar window (odd number of days)")
-                    drought_minimum_days = gr.Number(1, precision=0, label="Minimum drought spell days")
+                    drought_quantile = gr.Number(0.15, label="Seasonal training quantile (0–1)")
+                    drought_calendar_window = gr.Number(
+                        31, precision=0, label="Seasonal calendar window (odd number of days)"
+                    )
+                    drought_minimum_days = gr.Number(
+                        1, precision=0, label="Minimum drought spell days"
+                    )
                 gr.Markdown(
                     "Drought thresholds are fitted from each selected basin's training observations. "
                     "The seasonal threshold uses smoothed discharge near each calendar day; Q347 is estimated "
@@ -842,20 +1060,32 @@ def build_app(
                     "rather than the supplied retrospective event labels or 1991–2020 climatology."
                 )
             drought_definition.change(
-                lambda value: (gr.Number(interactive=value == "seasonal_quantile"),
-                               gr.Number(interactive=value == "seasonal_quantile")),
-                inputs=drought_definition, outputs=[drought_quantile, drought_calendar_window],
+                lambda value: (
+                    gr.Number(interactive=value == "seasonal_quantile"),
+                    gr.Number(interactive=value == "seasonal_quantile"),
+                ),
+                inputs=drought_definition,
+                outputs=[drought_quantile, drought_calendar_window],
             )
-            extreme_mode.change(lambda mode: gr.Accordion(visible=mode == "drought"),
-                                inputs=extreme_mode, outputs=drought_panel)
-            forecast_mode=gr.Radio([
-                ("One-day forecast (observed discharge history)", "one_day"),
-                ("Rolling multi-day hindcast", "rolling"),
-            ], value="one_day", label="Forecast setup")
-            horizon_days=gr.Number(7, precision=0, label="Rolling forecast horizon (days)")
-            gr.Markdown("Rolling forecasts replace future observed discharge with the model's own predictions. "
-                        "They use historical weather observations for future days, so they are perfect-weather "
-                        "hindcasts rather than operational forecasts.")
+            extreme_mode.change(
+                lambda mode: gr.Accordion(visible=mode == "drought"),
+                inputs=extreme_mode,
+                outputs=drought_panel,
+            )
+            forecast_mode = gr.Radio(
+                [
+                    ("One-day forecast (observed discharge history)", "one_day"),
+                    ("Rolling multi-day hindcast", "rolling"),
+                ],
+                value="one_day",
+                label="Forecast setup",
+            )
+            horizon_days = gr.Number(7, precision=0, label="Rolling forecast horizon (days)")
+            gr.Markdown(
+                "Rolling forecasts replace future observed discharge with the model's own predictions. "
+                "They use historical weather observations for future days, so they are perfect-weather "
+                "hindcasts rather than operational forecasts."
+            )
         with gr.Tab("Impact scenario"):
             gr.Markdown(
                 "## Paved-area runoff and retention\n"
@@ -865,7 +1095,8 @@ def build_app(
                 "**Compare with current run**."
             )
             scenario_enabled = gr.Checkbox(
-                False, label="Also apply scenario when using Run experiment in Results",
+                False,
+                label="Also apply scenario when using Run experiment in Results",
             )
             with gr.Row():
                 site_percent = gr.Number(0.1, label="Site area (% of upstream basin)")
@@ -878,7 +1109,8 @@ def build_app(
                 storage_mm = gr.Number(20, label="Retention capacity (mm over site)")
                 release_mm_day = gr.Number(2, label="Maximum release (mm/day over site)")
             scenario_start = gr.Textbox(
-                "", label="Start date (YYYY-MM-DD; blank = first forecast day)",
+                "",
+                label="Start date (YYYY-MM-DD; blank = first forecast day)",
             )
             gr.Markdown(
                 "Site area is a fraction of the basin upstream of the gauge. Runoff "
@@ -892,7 +1124,8 @@ def build_app(
                 "is not fed back into later model predictions."
             )
             scenario_basin = gr.Dropdown(
-                choices=choices, value=default_basins[0] if default_basins else None,
+                choices=choices,
+                value=default_basins[0] if default_basins else None,
                 label="Basin to compare (must be a prediction target)",
             )
             run_scenario_experiment = gr.Button("Run experiment with scenario", variant="primary")
@@ -901,20 +1134,30 @@ def build_app(
             scenario_plot = gr.Plot(label="Baseline and scenario discharge")
             scenario_events = gr.Dataframe(label="Before and after event counts")
         with gr.Tab("Results"):
-            run=gr.Button("Run experiment",variant="primary"); cancel=gr.Button("Cancel")
-            status=gr.Markdown()
+            run = gr.Button("Run experiment", variant="primary")
+            cancel = gr.Button("Cancel")
+            status = gr.Markdown()
             with gr.Row():
-                historical_map=map_component.gradio_component(
+                historical_map = map_component.gradio_component(
                     gr, interaction="activate", label="Historical / training status"
                 )
-                future_map=map_component.gradio_component(
+                future_map = map_component.gradio_component(
                     gr, future=True, interaction="activate", label="Prediction targets"
                 )
-            active_basin=gr.Dropdown(choices=choices,label="Active result basin")
-            with gr.Row(): hydrograph=gr.Plot(label="Observed and predicted hydrograph"); scatter=gr.Plot(label="Observed vs predicted")
-            with gr.Row(): routing_plot=gr.Plot(label="Complex-expert usage"); loss_plot=gr.Plot(label="Loss traces")
-            metrics=gr.JSON(label="Metrics"); extremes=gr.Dataframe(label="Extreme-event results")
-            with gr.Row(): predictions_file=gr.File(label="Predictions CSV"); metrics_file=gr.File(label="Metrics CSV"); config_file=gr.File(label="Resolved config"); archive_file=gr.File(label="Run archive")
+            active_basin = gr.Dropdown(choices=choices, label="Active result basin")
+            with gr.Row():
+                hydrograph = gr.Plot(label="Observed and predicted hydrograph")
+                scatter = gr.Plot(label="Observed vs predicted")
+            with gr.Row():
+                routing_plot = gr.Plot(label="Complex-expert usage")
+                loss_plot = gr.Plot(label="Loss traces")
+            metrics = gr.JSON(label="Metrics")
+            extremes = gr.Dataframe(label="Extreme-event results")
+            with gr.Row():
+                predictions_file = gr.File(label="Predictions CSV")
+                metrics_file = gr.File(label="Metrics CSV")
+                config_file = gr.File(label="Resolved config")
+                archive_file = gr.File(label="Run archive")
 
         with gr.Tab("Hydropower monitoring"):
             gr.Markdown(
@@ -925,8 +1168,11 @@ def build_app(
                 "This is not a live operational forecast unless the selected run contains future target dates."
             )
             gr.Markdown(hydropower_load_message)
-            saved_hydro_choices = [(item.label, item.run_id) for item in saved_runs
-                                   if (item.path / "predictions.csv").is_file()]
+            saved_hydro_choices = [
+                (item.label, item.run_id)
+                for item in saved_runs
+                if (item.path / "predictions.csv").is_file()
+            ]
             with gr.Row():
                 hydropower_run = gr.Dropdown(
                     choices=saved_hydro_choices,
@@ -941,7 +1187,8 @@ def build_app(
                 build_hydropower = gr.Button("Update hydropower map", variant="primary")
             initial_hydro_payload = (
                 hydropower_map_payload(hydropower_sites)
-                if hydropower_sites is not None else {"type": "FeatureCollection", "features": [], "target_date": None}
+                if hydropower_sites is not None
+                else {"type": "FeatureCollection", "features": [], "target_date": None}
             )
             hydropower_map = gr.HTML(
                 value=initial_hydro_payload,
@@ -958,8 +1205,17 @@ def build_app(
                 "Run an experiment first, then select a date and update the map."
             )
             hydropower_table = gr.Dataframe(
-                headers=["Plant", "Matched basin", "Forecast flow (m³/s)", "Previous day (m³/s)", "Change (%)", "Status"],
-                value=[], interactive=False, label="Hydropower plant forecasts",
+                headers=[
+                    "Plant",
+                    "Matched basin",
+                    "Forecast flow (m³/s)",
+                    "Previous day (m³/s)",
+                    "Change (%)",
+                    "Status",
+                ],
+                value=[],
+                interactive=False,
+                label="Hydropower plant forecasts",
             )
             if hydropower_path.is_file():
                 gr.File(value=str(hydropower_path), label="Local hydropower station GeoPackage")
@@ -971,22 +1227,37 @@ def build_app(
         with gr.Tab("Saved-run leaderboard"):
             persistence_note = (
                 f"Persistent saving is enabled: `{results_dir}`."
-                if save_results else
-                "Persistent saving is disabled. Launch with `--save-results true` to add runs."
+                if save_results
+                else "Persistent saving is disabled. Launch with `--save-results true` to add runs."
             )
             gr.Markdown(persistence_note)
             registry_status = gr.Markdown(
                 f"Loaded {len(saved_runs)} saved run(s)."
-                + (f" Skipped {len(snapshot.warnings)} invalid entry/entries." if snapshot.warnings else "")
+                + (
+                    f" Skipped {len(snapshot.warnings)} invalid entry/entries."
+                    if snapshot.warnings
+                    else ""
+                )
             )
             refresh_registry = gr.Button("Refresh saved runs")
             leaderboard = gr.Dataframe(
                 headers=[
-                    "run_id", "created_at", "approach", "complex", "simple", "epochs",
-                    "Legacy physics mode", "NSE", "KGE", "RMSE (mm/day)", "physics error",
-                    "parameters", "runtime (s)",
+                    "run_id",
+                    "created_at",
+                    "approach",
+                    "complex",
+                    "simple",
+                    "epochs",
+                    "Legacy physics mode",
+                    "NSE",
+                    "KGE",
+                    "RMSE (mm/day)",
+                    "physics error",
+                    "parameters",
+                    "runtime (s)",
                 ],
-                value=leaderboard_rows(saved_runs), interactive=False,
+                value=leaderboard_rows(saved_runs),
+                interactive=False,
                 label="Available runs",
             )
 
@@ -1001,7 +1272,8 @@ def build_app(
                         for field, label in FILTER_FIELDS:
                             choices_for_field = sorted({item.value(field) for item in saved_runs})
                             component = gr.Dropdown(
-                                choices=["Any", *choices_for_field], value="Any",
+                                choices=["Any", *choices_for_field],
+                                value="Any",
                                 label=label,
                             )
                             side_components.append(component)
@@ -1010,22 +1282,29 @@ def build_app(
                             choices=run_choices,
                             value=(
                                 run_choices[min(side_index, len(run_choices) - 1)][1]
-                                if run_choices else None
+                                if run_choices
+                                else None
                             ),
                             label=f"Concrete run {side}",
                         )
                         selector_components.append(side_components)
                         run_components.append(selected_run)
             compare_metric = gr.Dropdown(
-                choices=[("NSE", "nse"), ("KGE", "kge"), ("RMSE", "rmse_mm_day"),
-                         ("Physics error", "physics_error")],
-                value="nse", label="Per-basin chart metric",
+                choices=[
+                    ("NSE", "nse"),
+                    ("KGE", "kge"),
+                    ("RMSE", "rmse_mm_day"),
+                    ("Physics error", "physics_error"),
+                ],
+                value="nse",
+                label="Per-basin chart metric",
             )
             compare = gr.Button("Compare selected runs", variant="primary")
             comparison_status = gr.Markdown()
             comparison_table = gr.Dataframe(
                 headers=["field / metric", "setup A", "setup B", "B − A"],
-                interactive=False, label="Configuration and metric comparison",
+                interactive=False,
+                label="Configuration and metric comparison",
             )
             with gr.Row():
                 aggregate_chart = gr.Plot(label="Aggregate metrics")
@@ -1071,27 +1350,29 @@ the leaderboard lets you revisit and compare saved runs.
 
         def selection_payload(value):
             selected = [str(item) for item in (value or ()) if str(item) in eligible]
-            return selected, map_component.payload(
-                selected, future=True, interaction="toggle"
-            )
+            return selected, map_component.payload(selected, future=True, interaction="toggle")
 
         select_all.click(
             lambda: selection_payload(catalog.eligible_ids), outputs=[targets, basin_map]
         )
         clear.click(lambda: selection_payload(()), outputs=[targets, basin_map])
         targets.change(
-            lambda value: map_component.payload(
-                value or (), future=True, interaction="toggle"
-            ),
-            inputs=targets, outputs=basin_map,
+            lambda value: map_component.payload(value or (), future=True, interaction="toggle"),
+            inputs=targets,
+            outputs=basin_map,
         )
         basin_map.input(
-            lambda value: selection_payload(value.get("selected", ()) if isinstance(value, dict) else ())[0],
-            inputs=basin_map, outputs=targets,
+            lambda value: selection_payload(
+                value.get("selected", ()) if isinstance(value, dict) else ()
+            )[0],
+            inputs=basin_map,
+            outputs=targets,
         )
         cancel.click(
             lambda token: (token.cancel() if token else None, "Cancellation requested.")[1],
-            inputs=token_state, outputs=status, queue=False,
+            inputs=token_state,
+            outputs=status,
+            queue=False,
         )
 
         def validate_estreams_path(path):
@@ -1101,13 +1382,12 @@ the leaderboard lets you revisit and compare saved runs.
                 gauge_count = validate_optional_dataset("estreams", path)
             except (OSError, ValueError) as error:
                 return f"EStreams validation failed: {error}"
-            return (
-                f"EStreams layout is valid; {gauge_count} "
-                "CAMELS-CH gauges are available."
-            )
+            return f"EStreams layout is valid; {gauge_count} CAMELS-CH gauges are available."
 
         validate_estreams.click(
-            validate_estreams_path, inputs=estreams_path, outputs=estreams_status,
+            validate_estreams_path,
+            inputs=estreams_path,
+            outputs=estreams_status,
             queue=False,
         )
 
@@ -1119,14 +1399,16 @@ the leaderboard lets you revisit and compare saved runs.
             except (OSError, ValueError) as error:
                 return f"CAMELS-CH-Chem validation failed: {error}"
             return (
-                f"CAMELS-CH-Chem layout is valid; {gauge_count} "
-                "CAMELS-CH catchments are available."
+                f"CAMELS-CH-Chem layout is valid; {gauge_count} CAMELS-CH catchments are available."
             )
 
         validate_camels_chem.click(
-            validate_camels_chem_path, inputs=camels_chem_path,
-            outputs=camels_chem_status, queue=False,
+            validate_camels_chem_path,
+            inputs=camels_chem_path,
+            outputs=camels_chem_status,
+            queue=False,
         )
+
         def validate_hyd_responses_path(path, selected):
             if not str(path or "").strip():
                 return "Enter a HYD-RESPONSES dataset directory first."
@@ -1135,12 +1417,19 @@ the leaderboard lets you revisit and compare saved runs.
                 available = set(hyd.gauge_ids)
                 matching = available & set(catalog.eligible_ids)
                 missing = set(selected or ()) - available
-                partial = [basin for basin in selected or ()
-                           if basin in hyd.stations
-                           and float(hyd.stations[basin].get("percentage_overlap_CH") or 0) < 95]
+                partial = [
+                    basin
+                    for basin in selected or ()
+                    if basin in hyd.stations
+                    and float(hyd.stations[basin].get("percentage_overlap_CH") or 0) < 95
+                ]
                 message = f"Valid HYD-RESPONSES layout; {len(matching)} eligible CAMELS-CH basin IDs match directly."
                 if missing:
-                    message += " Selected basins without HYD-RESPONSES data: " + ", ".join(sorted(missing)) + "."
+                    message += (
+                        " Selected basins without HYD-RESPONSES data: "
+                        + ", ".join(sorted(missing))
+                        + "."
+                    )
                 if partial:
                     message += " Check partial Swiss snow coverage for: " + ", ".join(partial) + "."
                 return message
@@ -1148,28 +1437,32 @@ the leaderboard lets you revisit and compare saved runs.
                 return f"HYD-RESPONSES validation failed: {error}"
 
         validate_hyd_responses.click(
-            validate_hyd_responses_path, inputs=[hyd_responses_path, targets],
-            outputs=hyd_responses_status, queue=False,
+            validate_hyd_responses_path,
+            inputs=[hyd_responses_path, targets],
+            outputs=hyd_responses_status,
+            queue=False,
         )
 
         def _selector_updates(values):
-            selections = {
-                field: value for (field, _), value in zip(FILTER_FIELDS, values)
-            }
+            selections = {field: value for (field, _), value in zip(FILTER_FIELDS, values)}
             updates = []
             for field, _ in FILTER_FIELDS:
                 choices_for_field = available_values(saved_runs, selections, field)
                 current = selections[field]
-                updates.append(gr.Dropdown(
-                    choices=["Any", *choices_for_field],
-                    value=current if current in choices_for_field else "Any",
-                ))
+                updates.append(
+                    gr.Dropdown(
+                        choices=["Any", *choices_for_field],
+                        value=current if current in choices_for_field else "Any",
+                    )
+                )
             matches = filter_runs(saved_runs, selections)
             choices_for_run = [(item.label, item.run_id) for item in matches]
-            updates.append(gr.Dropdown(
-                choices=choices_for_run,
-                value=choices_for_run[0][1] if choices_for_run else None,
-            ))
+            updates.append(
+                gr.Dropdown(
+                    choices=choices_for_run,
+                    value=choices_for_run[0][1] if choices_for_run else None,
+                )
+            )
             return updates
 
         def _make_selector_callback():
@@ -1199,9 +1492,12 @@ the leaderboard lets you revisit and compare saved runs.
             refresh_saved_runs,
             inputs=all_filters,
             outputs=[
-                leaderboard, registry_status,
-                *selector_components[0], run_components[0],
-                *selector_components[1], run_components[1],
+                leaderboard,
+                registry_status,
+                *selector_components[0],
+                run_components[0],
+                *selector_components[1],
+                run_components[1],
             ],
             queue=False,
         )
@@ -1216,16 +1512,24 @@ the leaderboard lets you revisit and compare saved runs.
                 raise gr.Error("Select two different saved runs")
             run_a, run_b = by_id[run_a_id], by_id[run_b_id]
             comparison_data = compare_runs(run_a, run_b)
-            table = []
+            table: list[list[object]] = []
             for field, label in FILTER_FIELDS:
                 table.append([label, run_a.value(field), run_b.value(field), ""])
-            table.extend([
-                ["Target basins", run_a.value("basins.target_basins"),
-                 run_b.value("basins.target_basins"), ""],
-                ["Created", run_a.created_at, run_b.created_at, ""],
-            ])
+            table.extend(
+                [
+                    [
+                        "Target basins",
+                        run_a.value("basins.target_basins"),
+                        run_b.value("basins.target_basins"),
+                        "",
+                    ],
+                    ["Created", run_a.created_at, run_b.created_at, ""],
+                ]
+            )
             metric_labels = (
-                ("NSE", "nse"), ("KGE", "kge"), ("RMSE (mm/day)", "rmse_mm_day"),
+                ("NSE", "nse"),
+                ("KGE", "kge"),
+                ("RMSE (mm/day)", "rmse_mm_day"),
                 ("Physics error", "physics_error"),
             )
             for label, key in metric_labels:
@@ -1234,25 +1538,42 @@ the leaderboard lets you revisit and compare saved runs.
                 delta = comparison_data["aggregate_delta_b_minus_a"].get(key)
                 table.append([label, value_a, value_b, delta])
             for key, delta in sorted(comparison_data["drought_delta_b_minus_a"].items()):
-                table.append([f"Drought macro mean: {key}",
-                              comparison_data["run_a"]["drought_summary"].get(key),
-                              comparison_data["run_b"]["drought_summary"].get(key), delta])
-            table.extend([
-                ["Parameters", run_a.parameter_count, run_b.parameter_count,
-                 run_b.parameter_count - run_a.parameter_count],
-                ["Runtime (s)", run_a.runtime_seconds, run_b.runtime_seconds,
-                 run_b.runtime_seconds - run_a.runtime_seconds],
-            ])
+                table.append(
+                    [
+                        f"Drought macro mean: {key}",
+                        comparison_data["run_a"]["drought_summary"].get(key),
+                        comparison_data["run_b"]["drought_summary"].get(key),
+                        delta,
+                    ]
+                )
+            table.extend(
+                [
+                    [
+                        "Parameters",
+                        run_a.parameter_count,
+                        run_b.parameter_count,
+                        run_b.parameter_count - run_a.parameter_count,
+                    ],
+                    [
+                        "Runtime (s)",
+                        run_a.runtime_seconds,
+                        run_b.runtime_seconds,
+                        run_b.runtime_seconds - run_a.runtime_seconds,
+                    ],
+                ]
+            )
 
             aggregate = go.Figure()
             aggregate_keys = [item[1] for item in metric_labels]
             aggregate_labels = [item[0] for item in metric_labels]
             aggregate.add_bar(
-                name="Setup A", x=aggregate_labels,
+                name="Setup A",
+                x=aggregate_labels,
                 y=[run_a.aggregate_metrics.get(key) for key in aggregate_keys],
             )
             aggregate.add_bar(
-                name="Setup B", x=aggregate_labels,
+                name="Setup B",
+                x=aggregate_labels,
                 y=[run_b.aggregate_metrics.get(key) for key in aggregate_keys],
             )
             aggregate.update_layout(barmode="group", title="Aggregate test metrics")
@@ -1260,35 +1581,49 @@ the leaderboard lets you revisit and compare saved runs.
             basin = go.Figure()
             basin_ids = sorted(set(run_a.per_basin_metrics) | set(run_b.per_basin_metrics))
             basin.add_bar(
-                name="Setup A", x=basin_ids,
+                name="Setup A",
+                x=basin_ids,
                 y=[run_a.per_basin_metrics.get(item, {}).get(metric_name) for item in basin_ids],
             )
             basin.add_bar(
-                name="Setup B", x=basin_ids,
+                name="Setup B",
+                x=basin_ids,
                 y=[run_b.per_basin_metrics.get(item, {}).get(metric_name) for item in basin_ids],
             )
             basin.update_layout(
-                barmode="group", title=f"Per-basin {metric_name}", xaxis_title="Basin",
+                barmode="group",
+                title=f"Per-basin {metric_name}",
+                xaxis_title="Basin",
             )
 
             losses = go.Figure()
             for side, selected, dash in (("A", run_a, "solid"), ("B", run_b, "dash")):
                 for phase, values in selected.loss_traces.items():
                     losses.add_scatter(
-                        y=values, mode="lines+markers", name=f"{side}: {phase}",
+                        y=values,
+                        mode="lines+markers",
+                        name=f"{side}: {phase}",
                         line={"dash": dash},
                     )
             losses.update_layout(title="Training traces", xaxis_title="Step")
             return (
                 f"Comparing `{run_a.run_id}` with `{run_b.run_id}`.",
-                table, aggregate, basin, losses,
+                table,
+                aggregate,
+                basin,
+                losses,
             )
 
         compare.click(
             compare_saved_runs,
             inputs=[run_components[0], run_components[1], compare_metric],
-            outputs=[comparison_status, comparison_table, aggregate_chart,
-                     basin_chart, loss_comparison],
+            outputs=[
+                comparison_status,
+                comparison_table,
+                aggregate_chart,
+                basin_chart,
+                loss_comparison,
+            ],
         )
 
         def find_replay_episodes(result, basin):
@@ -1313,13 +1648,24 @@ the leaderboard lets you revisit and compare saved runs.
             rows = [row for row in result.predictions if row.basin_id == str(basin)]
             if not rows or str(basin) not in result.resolved_config["basins"]["target_basins"]:
                 raise gr.Error("Select a prediction target from the current run")
-            context = int(result.resolved_config.get("hyperparameters", {}).get(
-                "sequence_length", 30))
+            context = int(
+                result.resolved_config.get("hyperparameters", {}).get("sequence_length", 30)
+            )
             feature_names = result.resolved_config.get("feature_names", [])
             static_names = result.resolved_config.get("static_feature_names", [])
-            extras = [name for name in feature_names if name not in {
-                "precipitation", "temperature", "pet", "previous_discharge", "day_sin", "day_cos"
-            }]
+            extras = [
+                name
+                for name in feature_names
+                if name
+                not in {
+                    "precipitation",
+                    "temperature",
+                    "pet",
+                    "previous_discharge",
+                    "day_sin",
+                    "day_cos",
+                }
+            ]
             first = date.fromisoformat(str(episode))
             try:
                 replay = prepare_replay(result, catalog, str(basin), first, executor=executor)
@@ -1337,9 +1683,15 @@ the leaderboard lets you revisit and compare saved runs.
                 "uncalibrated teaching bucket, not the trained model."
             )
             figures = replay_figures(replay, 1)
-            return (replay, gr.Slider(maximum=len(replay.dates) - context, value=1,
-                                      interactive=True), *figures, details,
-                    replay_day_summary(replay, 1), None, None)
+            return (
+                replay,
+                gr.Slider(maximum=len(replay.dates) - context, value=1, interactive=True),
+                *figures,
+                details,
+                replay_day_summary(replay, 1),
+                None,
+                None,
+            )
 
         def replay_day_summary(replay, day_number):
             i = replay.context_days + day_number - 1
@@ -1370,46 +1722,100 @@ the leaderboard lets you revisit and compare saved runs.
             except (OSError, RuntimeError) as error:
                 raise gr.Error(str(error)) from error
 
-        replay_find.click(find_replay_episodes,
-                          inputs=[experiment_state, replay_basin],
-                          outputs=[replay_episode, replay_status])
-        replay_basin.change(
-            lambda: (gr.Dropdown(choices=[], value=None), None,
-                     gr.Slider(value=1, interactive=False), None, None, None, None,
-                     "Find rainfall episodes for this basin.", None, None, None),
-            outputs=[replay_episode, replay_state, replay_day, replay_weather,
-                     replay_discharge, replay_bucket, replay_scene,
-                     replay_status, replay_gif, replay_preview, replay_inputs],
+        replay_find.click(
+            find_replay_episodes,
+            inputs=[experiment_state, replay_basin],
+            outputs=[replay_episode, replay_status],
         )
-        replay_show.click(show_replay,
-                          inputs=[experiment_state, replay_basin, replay_episode],
-                          outputs=[replay_state, replay_day, replay_weather,
-                                   replay_discharge, replay_bucket, replay_scene,
-                                   replay_inputs, replay_status, replay_gif,
-                                   replay_preview])
-        replay_day.input(select_replay_day, inputs=[replay_state, replay_day],
-                         outputs=[replay_weather, replay_discharge, replay_bucket,
-                                  replay_scene, replay_status])
-        replay_download.click(download_replay_gif, inputs=replay_state,
-                              outputs=[replay_gif, replay_preview])
+        replay_basin.change(
+            lambda: (
+                gr.Dropdown(choices=[], value=None),
+                None,
+                gr.Slider(value=1, interactive=False),
+                None,
+                None,
+                None,
+                None,
+                "Find rainfall episodes for this basin.",
+                None,
+                None,
+                None,
+            ),
+            outputs=[
+                replay_episode,
+                replay_state,
+                replay_day,
+                replay_weather,
+                replay_discharge,
+                replay_bucket,
+                replay_scene,
+                replay_status,
+                replay_gif,
+                replay_preview,
+                replay_inputs,
+            ],
+        )
+        replay_show.click(
+            show_replay,
+            inputs=[experiment_state, replay_basin, replay_episode],
+            outputs=[
+                replay_state,
+                replay_day,
+                replay_weather,
+                replay_discharge,
+                replay_bucket,
+                replay_scene,
+                replay_inputs,
+                replay_status,
+                replay_gif,
+                replay_preview,
+            ],
+        )
+        replay_day.input(
+            select_replay_day,
+            inputs=[replay_state, replay_day],
+            outputs=[replay_weather, replay_discharge, replay_bucket, replay_scene, replay_status],
+        )
+        replay_download.click(
+            download_replay_gif, inputs=replay_state, outputs=[replay_gif, replay_preview]
+        )
 
         def result_views(result, basin):
             import plotly.graph_objects as go
 
             target_basins = tuple(result.resolved_config["basins"]["target_basins"])
-            basin = str(basin) if basin is not None else (target_basins[0] if target_basins else None)
+            basin = (
+                str(basin) if basin is not None else (target_basins[0] if target_basins else None)
+            )
             if basin not in target_basins:
                 basin = target_basins[0] if target_basins else None
-            rows=[row for row in result.predictions if row.basin_id == basin]
-            hydro=go.Figure()
+            rows = [row for row in result.predictions if row.basin_id == basin]
+            hydro = go.Figure()
             if rows:
-                by_date={}
-                for row in rows: by_date.setdefault(row.target_date, [[], row.observed_mm_day])[0].append(row.predicted_mm_day)
-                days=sorted(by_date); predicted=[sum(by_date[x][0])/len(by_date[x][0]) for x in days]; observed=[by_date[x][1] for x in days]
-                hydro.add_scatter(x=days,y=observed,name="Observed"); hydro.add_scatter(x=days,y=predicted,name="Predicted")
-            points=go.Figure(); points.add_scatter(x=[x.observed_mm_day for x in rows],y=[x.predicted_mm_day for x in rows],mode="markers")
-            route=go.Figure(); route.add_scatter(x=[x.target_date for x in rows],y=[x.complex_weight for x in rows],mode="lines",name="Complex weight")
-            losses=go.Figure()
+                by_date: dict[date, tuple[list[float], float]] = {}
+                for row in rows:
+                    by_date.setdefault(row.target_date, ([], row.observed_mm_day))[0].append(
+                        row.predicted_mm_day
+                    )
+                days = sorted(by_date)
+                predicted = [sum(by_date[x][0]) / len(by_date[x][0]) for x in days]
+                observed = [by_date[x][1] for x in days]
+                hydro.add_scatter(x=days, y=observed, name="Observed")
+                hydro.add_scatter(x=days, y=predicted, name="Predicted")
+            points = go.Figure()
+            points.add_scatter(
+                x=[x.observed_mm_day for x in rows],
+                y=[x.predicted_mm_day for x in rows],
+                mode="markers",
+            )
+            route = go.Figure()
+            route.add_scatter(
+                x=[x.target_date for x in rows],
+                y=[x.complex_weight for x in rows],
+                mode="lines",
+                name="Complex weight",
+            )
+            losses = go.Figure()
             for phase, trace in result.loss_traces.items():
                 standalone = phase.startswith("kan_standalone_")
                 losses.add_scatter(
@@ -1417,18 +1823,24 @@ the leaderboard lets you revisit and compare saved runs.
                     mode="markers" if standalone else "lines+markers",
                     name=phase,
                 )
-            training=result.resolved_config["effective_training_basins"]
+            training = result.resolved_config["effective_training_basins"]
             return (
                 basin,
-                map_component.payload(target_basins, active=basin, training=training,
-                                      interaction="activate"),
-                map_component.payload(target_basins, active=basin, future=True,
-                                      interaction="activate"),
-                hydro, points, route, losses,
+                map_component.payload(
+                    target_basins, active=basin, training=training, interaction="activate"
+                ),
+                map_component.payload(
+                    target_basins, active=basin, future=True, interaction="activate"
+                ),
+                hydro,
+                points,
+                route,
+                losses,
             )
 
-        def paved_site_setup(site, old_paved, new_paved, connected, pervious,
-                             paved, capacity, release, start_text):
+        def paved_site_setup(
+            site, old_paved, new_paved, connected, pervious, paved, capacity, release, start_text
+        ):
             start = date.fromisoformat(str(start_text).strip()) if str(start_text).strip() else None
             setup = PavedSiteConfig(
                 site_fraction=float(site) / 100,
@@ -1438,7 +1850,8 @@ the leaderboard lets you revisit and compare saved runs.
                 paved_runoff_coefficient=float(paved),
                 connected_fraction=float(connected) / 100,
                 storage_capacity_mm=float(capacity),
-                release_mm_day=float(release), start_date=start,
+                release_mm_day=float(release),
+                start_date=start,
             )
             setup.validate()
             return setup
@@ -1454,7 +1867,9 @@ the leaderboard lets you revisit and compare saved runs.
                 raise gr.Error("Select a prediction target from the current run")
             try:
                 setup = paved_site_setup(*site_values)
-                comparison = evaluate_scenario(result, catalog, str(basin), setup, executor=executor)
+                comparison = evaluate_scenario(
+                    result, catalog, str(basin), setup, executor=executor
+                )
             except (TypeError, ValueError, FileNotFoundError, RuntimeError) as error:
                 raise gr.Error(str(error)) from error
             frame = pd.DataFrame(comparison.rows)
@@ -1462,19 +1877,32 @@ the leaderboard lets you revisit and compare saved runs.
                 ["baseline_mm_day", "scenario_mm_day"]
             ].mean()
             figure = go.Figure()
-            figure.add_scatter(x=daily["date"], y=daily["baseline_mm_day"],
-                               name="Baseline", mode="lines")
-            figure.add_scatter(x=daily["date"], y=daily["scenario_mm_day"],
-                               name="Proposed site", mode="lines")
-            figure.update_layout(yaxis_title="Discharge (mm/day)",
-                                 title=f"Basin {basin}: mean across seeds")
+            figure.add_scatter(
+                x=daily["date"], y=daily["baseline_mm_day"], name="Baseline", mode="lines"
+            )
+            figure.add_scatter(
+                x=daily["date"], y=daily["scenario_mm_day"], name="Proposed site", mode="lines"
+            )
+            figure.update_layout(
+                yaxis_title="Discharge (mm/day)", title=f"Basin {basin}: mean across seeds"
+            )
             return comparison.summary, figure, pd.DataFrame(comparison.events)
 
         run_scenario.click(
             compare_paved_site,
-            inputs=[experiment_state, scenario_basin, site_percent, original_paved,
-                    proposed_paved, connected_percent, pervious_coefficient,
-                    paved_coefficient, storage_mm, release_mm_day, scenario_start],
+            inputs=[
+                experiment_state,
+                scenario_basin,
+                site_percent,
+                original_paved,
+                proposed_paved,
+                connected_percent,
+                pervious_coefficient,
+                paved_coefficient,
+                storage_mm,
+                release_mm_day,
+                scenario_start,
+            ],
             outputs=[scenario_summary, scenario_plot, scenario_events],
         )
 
@@ -1487,13 +1915,19 @@ the leaderboard lets you revisit and compare saved runs.
                 if run_with_scenario:
                     paved_site_setup(*scenario_values)
                 config = _config_from_ui_values(
-                    data_root, target_values, scope_value, values[:-10],
+                    data_root,
+                    target_values,
+                    scope_value,
+                    values[:-10],
                     estreams_root=estreams_root,
                     camels_chem_root=camels_chem_root,
                     hyd_responses_root=hyd_responses_root,
                 )
-                result=execute_experiment(
-                    config, lambda fraction,message: progress(fraction,desc=message), token, executor=executor
+                result = execute_experiment(
+                    config,
+                    lambda fraction, message: progress(fraction, desc=message),
+                    token,
+                    executor=executor,
                 )
             except (ValueError, FileNotFoundError, RuntimeError) as error:
                 raise gr.Error(str(error)) from error
@@ -1508,7 +1942,9 @@ the leaderboard lets you revisit and compare saved runs.
                     "archive": saved.path / "regional_experiment.zip",
                 }
             if result.cancelled:
-                message = "Cancelled; showing completed partial results. The partial run was not saved."
+                message = (
+                    "Cancelled; showing completed partial results. The partial run was not saved."
+                )
             elif paths is not None:
                 message = (
                     f"Completed in {result.runtime_seconds:.1f}s and saved to the leaderboard. "
@@ -1524,39 +1960,75 @@ the leaderboard lets you revisit and compare saved runs.
                 labels = {record.basin_id: record.name for record in catalog.records}
                 catchments = ", ".join(
                     f"{labels.get(basin, basin)} ({basin})"
-                    if labels.get(basin, basin) != basin else basin
+                    if labels.get(basin, basin) != basin
+                    else basin
                     for basin in skipped
                 )
                 message += (
                     f"\n\nThese catchments were skipped because no usable data was available "
                     f"for the selected date splits and input-window length: {catchments}."
                 )
-            basin,historical,future,hydro,points,route,losses=result_views(
+            basin, historical, future, hydro, points, route, losses = result_views(
                 result, (target_values or [None])[0]
             )
             scenario_result = (None, None, None)
             if run_with_scenario and result.predictions and not result.cancelled:
                 scenario_result = compare_paved_site(result, basin, *scenario_values)
                 message += " Paved-site comparison is ready in the Impact scenario tab."
-            metric_value={"aggregate":result.aggregate_metrics,"per_basin":result.per_basin_metrics,"by_lead_day":result.forecast_metrics,"routing":result.routing_diagnostics,"parameters":result.parameter_count,"runtime_seconds":result.runtime_seconds,"failures":result.failures}
+            metric_value = {
+                "aggregate": result.aggregate_metrics,
+                "per_basin": result.per_basin_metrics,
+                "by_lead_day": result.forecast_metrics,
+                "routing": result.routing_diagnostics,
+                "parameters": result.parameter_count,
+                "runtime_seconds": result.runtime_seconds,
+                "failures": result.failures,
+            }
             if config.extremes.mode == "drought":
                 from .hydrology_drought import drought_summary
+
                 metric_value["drought_lead_macro_means"] = drought_summary(result.extreme_events)
-            file_values = (
+            file_values: list[str | None] = (
                 [str(paths[key]) for key in ("predictions", "metrics", "config", "archive")]
-                if paths is not None else [None, None, None, None]
+                if paths is not None
+                else [None, None, None, None]
             )
             registry_message = f"Loaded {len(saved_runs)} saved run(s)."
-            scenario_choices = [item for item in choices if item[1] in result.resolved_config["basins"]["target_basins"]]
+            scenario_choices = [
+                item
+                for item in choices
+                if item[1] in result.resolved_config["basins"]["target_basins"]
+            ]
             return (
-                token, result, message, historical, future, basin, hydro, points, route,
-                losses, metric_value, pd.DataFrame(result.extreme_events), *file_values,
-                leaderboard_rows(saved_runs), registry_message,
-                gr.Dropdown(choices=scenario_choices, value=basin), *scenario_result,
+                token,
+                result,
+                message,
+                historical,
+                future,
+                basin,
+                hydro,
+                points,
+                route,
+                losses,
+                metric_value,
+                pd.DataFrame(result.extreme_events),
+                *file_values,
+                leaderboard_rows(saved_runs),
+                registry_message,
                 gr.Dropdown(choices=scenario_choices, value=basin),
-                gr.Dropdown(choices=[], value=None), None,
-                gr.Slider(value=1, interactive=False), None, None, None, None,
-                "Choose a basin and find rainfall episodes.", None, None, None,
+                *scenario_result,
+                gr.Dropdown(choices=scenario_choices, value=basin),
+                gr.Dropdown(choices=[], value=None),
+                None,
+                gr.Slider(value=1, interactive=False),
+                None,
+                None,
+                None,
+                None,
+                "Choose a basin and find rainfall episodes.",
+                None,
+                None,
+                None,
             )
 
         def refresh_result(basin, result):
@@ -1571,60 +2043,203 @@ the leaderboard lets you revisit and compare saved runs.
         def refresh_result_views(basin, result):
             return refresh_result(basin, result)[1:]
 
-        inputs=[targets,scope,train_start,train_end,val_start,val_end,test_start,test_end,approach,complex_expert,simple_expert,epochs,sequence,seeds,batch,learning_rate,noise,percentile,temperature,physics_weight,interface_weight,teacher_epochs,distill_epochs,consolidation_epochs,mlp_widths,mamba_hidden,mamba_layers,mamba_ff,rbf_centers,fourier_frequencies,extreme_mode,routing_weight,compute_weight,device,definition,extreme_value,ood_quantile,ood_shrinkage,*retired_physics_slots,use_estreams,estreams_path,estreams_features,use_camels_chem,camels_chem_path,camels_chem_features,forecast_mode,horizon_days,event_types,high_quantile,low_quantile,rise_quantile,minimum_days,pulse_gap_days,minimum_basins,fall_quantile,complexity_method,routing_context,embedding_dim,embedding_delay,ph_min_persistence,ph_score,lyapunov_theiler,lyapunov_horizon,lyapunov_r2,camels_state_features,use_hyd_responses,hyd_responses_path,hyd_responses_features,hyd_responses_static,drought_definition,drought_smoothing,drought_quantile,drought_calendar_window,drought_minimum_days]
+        inputs = [
+            targets,
+            scope,
+            train_start,
+            train_end,
+            val_start,
+            val_end,
+            test_start,
+            test_end,
+            approach,
+            complex_expert,
+            simple_expert,
+            epochs,
+            sequence,
+            seeds,
+            batch,
+            learning_rate,
+            noise,
+            percentile,
+            temperature,
+            physics_weight,
+            interface_weight,
+            teacher_epochs,
+            distill_epochs,
+            consolidation_epochs,
+            mlp_widths,
+            mamba_hidden,
+            mamba_layers,
+            mamba_ff,
+            rbf_centers,
+            fourier_frequencies,
+            extreme_mode,
+            routing_weight,
+            compute_weight,
+            device,
+            definition,
+            extreme_value,
+            ood_quantile,
+            ood_shrinkage,
+            *retired_physics_slots,
+            use_estreams,
+            estreams_path,
+            estreams_features,
+            use_camels_chem,
+            camels_chem_path,
+            camels_chem_features,
+            forecast_mode,
+            horizon_days,
+            event_types,
+            high_quantile,
+            low_quantile,
+            rise_quantile,
+            minimum_days,
+            pulse_gap_days,
+            minimum_basins,
+            fall_quantile,
+            complexity_method,
+            routing_context,
+            embedding_dim,
+            embedding_delay,
+            ph_min_persistence,
+            ph_score,
+            lyapunov_theiler,
+            lyapunov_horizon,
+            lyapunov_r2,
+            camels_state_features,
+            use_hyd_responses,
+            hyd_responses_path,
+            hyd_responses_features,
+            hyd_responses_static,
+            drought_definition,
+            drought_smoothing,
+            drought_quantile,
+            drought_calendar_window,
+            drought_minimum_days,
+        ]
         prepare = run.click(lambda: CancellationToken(), outputs=token_state, queue=False)
         scenario_prepare = run_scenario_experiment.click(
             lambda: (CancellationToken(), True),
-            outputs=[token_state, scenario_enabled], queue=False,
+            outputs=[token_state, scenario_enabled],
+            queue=False,
         )
-        scenario_inputs = [site_percent, original_paved, proposed_paved,
-                           connected_percent, pervious_coefficient, paved_coefficient,
-                           storage_mm, release_mm_day, scenario_start]
+        scenario_inputs = [
+            site_percent,
+            original_paved,
+            proposed_paved,
+            connected_percent,
+            pervious_coefficient,
+            paved_coefficient,
+            storage_mm,
+            release_mm_day,
+            scenario_start,
+        ]
         for launch_event in (prepare, scenario_prepare):
             launch_event.then(
                 execute,
-                inputs=[targets, scope, token_state, *inputs[2:],
-                        scenario_enabled, *scenario_inputs],
-                outputs=[token_state,experiment_state,status,historical_map,future_map,active_basin,
-                         hydrograph,scatter,routing_plot,loss_plot,metrics,extremes,
-                         predictions_file,metrics_file,config_file,archive_file,
-                         leaderboard,registry_status,scenario_basin,scenario_summary,
-                         scenario_plot,scenario_events,replay_basin,replay_episode,replay_state,
-                         replay_day,replay_weather,replay_discharge,replay_bucket,replay_scene,
-                         replay_status,replay_gif,replay_preview,replay_inputs],
-                concurrency_id="regional-training", concurrency_limit=1,
+                inputs=[
+                    targets,
+                    scope,
+                    token_state,
+                    *inputs[2:],
+                    scenario_enabled,
+                    *scenario_inputs,
+                ],
+                outputs=[
+                    token_state,
+                    experiment_state,
+                    status,
+                    historical_map,
+                    future_map,
+                    active_basin,
+                    hydrograph,
+                    scatter,
+                    routing_plot,
+                    loss_plot,
+                    metrics,
+                    extremes,
+                    predictions_file,
+                    metrics_file,
+                    config_file,
+                    archive_file,
+                    leaderboard,
+                    registry_status,
+                    scenario_basin,
+                    scenario_summary,
+                    scenario_plot,
+                    scenario_events,
+                    replay_basin,
+                    replay_episode,
+                    replay_state,
+                    replay_day,
+                    replay_weather,
+                    replay_discharge,
+                    replay_bucket,
+                    replay_scene,
+                    replay_status,
+                    replay_gif,
+                    replay_preview,
+                    replay_inputs,
+                ],
+                concurrency_id="regional-training",
+                concurrency_limit=1,
             )
-        result_outputs=[active_basin,historical_map,future_map,hydrograph,scatter,routing_plot,loss_plot]
+        result_outputs = [
+            active_basin,
+            historical_map,
+            future_map,
+            hydrograph,
+            scatter,
+            routing_plot,
+            loss_plot,
+        ]
         active_basin.change(
-            refresh_result_views, inputs=[active_basin,experiment_state], outputs=result_outputs[1:]
+            refresh_result_views,
+            inputs=[active_basin, experiment_state],
+            outputs=result_outputs[1:],
         )
         historical_map.input(
-            activate_from_map, inputs=[historical_map,experiment_state], outputs=result_outputs
+            activate_from_map, inputs=[historical_map, experiment_state], outputs=result_outputs
         )
         future_map.input(
-            activate_from_map, inputs=[future_map,experiment_state], outputs=result_outputs
+            activate_from_map, inputs=[future_map, experiment_state], outputs=result_outputs
         )
+
         def update_hydropower_map(result, saved_run_id, date_text):
             if hydropower_sites is None:
-                return {"type": "FeatureCollection", "features": [], "target_date": None}, [], (
-                    "Hydropower station data are unavailable. " + hydropower_load_message
+                return (
+                    {"type": "FeatureCollection", "features": [], "target_date": None},
+                    [],
+                    ("Hydropower station data are unavailable. " + hydropower_load_message),
                 )
             try:
                 source_label = "current session"
                 if saved_run_id:
-                    selected_run = next((item for item in saved_runs if item.run_id == saved_run_id), None)
+                    selected_run = next(
+                        (item for item in saved_runs if item.run_id == saved_run_id), None
+                    )
                     if selected_run is None:
-                        raise ValueError("Selected saved run is no longer in the loaded registry. Refresh/restart the app and try again.")
+                        raise ValueError(
+                            "Selected saved run is no longer in the loaded registry. Refresh/restart the app and try again."
+                        )
                     result = load_saved_run_predictions(selected_run.path)
                     source_label = f"saved run `{selected_run.run_id}`"
                 if result is None or not getattr(result, "predictions", None):
-                    return hydropower_map_payload(hydropower_sites), [], (
-                        "No predictions are available. Select a saved run with predictions.csv or run an experiment first."
+                    return (
+                        hydropower_map_payload(hydropower_sites),
+                        [],
+                        (
+                            "No predictions are available. Select a saved run with predictions.csv or run an experiment first."
+                        ),
                     )
                 forecast_sites, selected_date = prepare_hydropower_forecast(
                     result, catalog, hydropower_sites, date_text
                 )
-                payload = hydropower_map_payload(forecast_sites, target_date=selected_date.isoformat())
+                payload = hydropower_map_payload(
+                    forecast_sites, target_date=selected_date.isoformat()
+                )
                 rows = hydropower_table_rows(forecast_sites)
                 matched = int(forecast_sites["basin_id"].notna().sum())
                 with_change = int(forecast_sites["change_pct"].notna().sum())
@@ -1636,57 +2251,81 @@ the leaderboard lets you revisit and compare saved runs.
                     note += " This is a historical/back-test date from the current run, not necessarily tomorrow."
                 return payload, rows, note
             except (ValueError, OSError, KeyError) as error:
-                return hydropower_map_payload(hydropower_sites), [], f"Could not build hydropower map: {error}"
-    
+                return (
+                    hydropower_map_payload(hydropower_sites),
+                    [],
+                    f"Could not build hydropower map: {error}",
+                )
+
         build_hydropower.click(
             update_hydropower_map,
             inputs=[experiment_state, hydropower_run, hydropower_date],
             outputs=[hydropower_map, hydropower_table, hydropower_status],
             queue=False,
         )
-    
+
     return app.queue(default_concurrency_limit=1)
 
 
 def main() -> None:
-    parser=argparse.ArgumentParser(description="Launch the regional CAMELS-CH Gradio application")
-    parser.add_argument("--data-root",type=Path,default=os.environ.get("CAMELS_CH_ROOT"))
+    parser = argparse.ArgumentParser(description="Launch the regional CAMELS-CH Gradio application")
+    parser.add_argument("--data-root", type=Path, default=os.environ.get("CAMELS_CH_ROOT"))
     parser.add_argument(
-        "--estreams-root", type=Path, default=os.environ.get("ESTREAMS_ROOT"),
+        "--estreams-root",
+        type=Path,
+        default=os.environ.get("ESTREAMS_ROOT"),
         help="Read EStreams vegetation and snow from this extracted dataset directory",
     )
     parser.add_argument(
-        "--camels-chem-root", type=Path, default=os.environ.get("CAMELS_CH_CHEM_ROOT"),
+        "--camels-chem-root",
+        type=Path,
+        default=os.environ.get("CAMELS_CH_CHEM_ROOT"),
         help="Read CAMELS-CH-Chem pressures from this extracted dataset directory",
     )
-    parser.add_argument("--host",default="127.0.0.1"); parser.add_argument("--port",type=int,default=7860)
-    parser.add_argument("--hyd-responses-root", type=Path, default=os.environ.get("HYD_RESPONSES_ROOT"),
-                        help="Read HYD-RESPONSES base water states from this extracted directory")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=7860)
     parser.add_argument(
-        "--save-results", type=parse_bool, default=False, metavar="true|false",
+        "--hyd-responses-root",
+        type=Path,
+        default=os.environ.get("HYD_RESPONSES_ROOT"),
+        help="Read HYD-RESPONSES base water states from this extracted directory",
+    )
+    parser.add_argument(
+        "--save-results",
+        type=parse_bool,
+        default=False,
+        metavar="true|false",
         help="Persist completed runs in the shared leaderboard registry (default: false)",
     )
     parser.add_argument(
-        "--results-dir", type=Path, default=DEFAULT_RESULTS_DIRECTORY,
+        "--results-dir",
+        type=Path,
+        default=DEFAULT_RESULTS_DIRECTORY,
         help="Shared run-registry directory",
     )
     parser.add_argument("--api-url", help="Submit training to a running API and worker")
     parser.add_argument("--dataset-id", help="Registered server dataset ID for remote execution")
-    args=parser.parse_args()
+    args = parser.parse_args()
     executor = None
     if args.api_url:
         if not args.dataset_id:
             parser.error("--dataset-id is required with --api-url")
         from .remote import RemoteExecutor
+
         executor = RemoteExecutor(args.api_url, args.dataset_id, os.environ.get("RUNOFF_API_TOKEN"))
-    if args.data_root is None: parser.error("--data-root or CAMELS_CH_ROOT is required")
+    if args.data_root is None:
+        parser.error("--data-root or CAMELS_CH_ROOT is required")
     CAMELSCHCatalog.validate_layout(args.data_root)
     build_app(
-        args.data_root, estreams_root=args.estreams_root,
+        args.data_root,
+        estreams_root=args.estreams_root,
         camels_chem_root=args.camels_chem_root,
         hyd_responses_root=args.hyd_responses_root,
-        save_results=args.save_results, results_dir=args.results_dir, executor=executor,
-    ).launch(server_name=args.host,server_port=args.port,share=True,**launch_style())
+        save_results=args.save_results,
+        results_dir=args.results_dir,
+        executor=executor,
+    ).launch(server_name=args.host, server_port=args.port, share=True, **launch_style())
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()

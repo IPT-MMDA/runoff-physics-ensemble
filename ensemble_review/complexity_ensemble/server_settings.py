@@ -1,10 +1,11 @@
 """Server-owned dataset registration and storage configuration."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from pathlib import Path
 import json
 import re
+from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -47,17 +48,36 @@ class ServerSettings:
     def load(cls, path: str | Path, *, token: str | None = None):
         path = Path(path).resolve()
         raw = json.loads(path.read_text())
-        unknown = set(raw) - {"storage_dir", "datasets", "results_dir", "cors_origins", "hydropower"}
+        unknown = set(raw) - {
+            "storage_dir",
+            "datasets",
+            "results_dir",
+            "cors_origins",
+            "hydropower",
+        }
         if unknown:
             raise ValueError(f"unknown server settings: {sorted(unknown)}")
+
         def local(value):
             p = Path(value).expanduser()
             return p.resolve() if p.is_absolute() else (path.parent / p).resolve()
+
         datasets = {}
         for key, value in raw.get("datasets", {}).items():
             if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", key):
-                raise ValueError("dataset IDs must contain only letters, numbers, underscores, or hyphens")
-            if set(value) - {"data_root", "estreams_root", "camels_chem_root", "hyd_responses_root", "bafu_root", "bafu_statistics_zip", "bafu_return_levels", "hanze_root"}:
+                raise ValueError(
+                    "dataset IDs must contain only letters, numbers, underscores, or hyphens"
+                )
+            if set(value) - {
+                "data_root",
+                "estreams_root",
+                "camels_chem_root",
+                "hyd_responses_root",
+                "bafu_root",
+                "bafu_statistics_zip",
+                "bafu_return_levels",
+                "hanze_root",
+            }:
                 raise ValueError(f"unknown dataset settings for {key}")
             datasets[key] = DatasetRegistration(
                 local(value["data_root"]),
@@ -73,12 +93,19 @@ class ServerSettings:
         if not isinstance(hydro_raw, dict):
             raise ValueError("hydropower settings must be an object")
         if set(hydro_raw) - {"enabled", "geopackage", "layer"}:
-            raise ValueError(f"unknown hydropower settings: {sorted(set(hydro_raw) - {'enabled', 'geopackage', 'layer'})}")
+            raise ValueError(
+                f"unknown hydropower settings: {sorted(set(hydro_raw) - {'enabled', 'geopackage', 'layer'})}"
+            )
         geopackage = local(hydro_raw["geopackage"]) if hydro_raw.get("geopackage") else None
         layer = str(hydro_raw["layer"]).strip() if hydro_raw.get("layer") else None
         if layer == "":
             raise ValueError("hydropower.layer must be a non-empty layer name when provided")
         hydropower = HydropowerSettings(bool(hydro_raw.get("enabled", True)), geopackage, layer)
-        return cls(local(raw.get("storage_dir", "artifacts/api")), datasets,
-                   local(raw["results_dir"]) if raw.get("results_dir") else None,
-                   token, tuple(raw.get("cors_origins", ())), hydropower)
+        return cls(
+            local(raw.get("storage_dir", "artifacts/api")),
+            datasets,
+            local(raw["results_dir"]) if raw.get("results_dir") else None,
+            token,
+            tuple(raw.get("cors_origins", ())),
+            hydropower,
+        )

@@ -1,14 +1,15 @@
 """Submit an API request, poll its job, and download paginated predictions."""
+
 from __future__ import annotations
 
 import argparse
 import json
 import os
-from pathlib import Path
 import time
+import uuid
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
-import uuid
 
 
 def main():
@@ -16,11 +17,14 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:8000")
     parser.add_argument("--request", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("predictions.json"))
-    parser.add_argument("--idempotency-key", default=None, help="Reuse this value when retrying a submission")
+    parser.add_argument(
+        "--idempotency-key", default=None, help="Reuse this value when retrying a submission"
+    )
     args = parser.parse_args()
     key = args.idempotency_key or uuid.uuid4().hex
     print(f"Idempotency key: {key}", flush=True)
     base = args.url.rstrip("/") + "/api/v1"
+
     def call(method, path, payload=None, idempotency_key=None):
         headers = {"Authorization": "Bearer " + os.environ.get("RUNOFF_API_TOKEN", "")}
         data = None
@@ -35,6 +39,7 @@ def main():
                 return json.load(response)
         except HTTPError as error:
             raise RuntimeError(error.read().decode()) from error
+
     body = json.loads(args.request.read_text())
     call("POST", "/experiments/validate", body)
     job = call("POST", "/experiments", body, key)

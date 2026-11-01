@@ -11,10 +11,15 @@ from complexity_ensemble.ood import MahalanobisOODDetector
 from complexity_ensemble.stacking import fit_convex_stacking_weight
 
 
-@pytest.mark.parametrize("cuda,mps,expected", [
-    (True, True, "cuda"), (True, False, "cuda"),
-    (False, True, "mps"), (False, False, "cpu"),
-])
+@pytest.mark.parametrize(
+    "cuda,mps,expected",
+    [
+        (True, True, "cuda"),
+        (True, False, "cuda"),
+        (False, True, "mps"),
+        (False, False, "cpu"),
+    ],
+)
 def test_auto_device_priority(monkeypatch, cuda, mps, expected):
     monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda)
     monkeypatch.setattr(torch.backends.mps, "is_available", lambda: mps)
@@ -52,7 +57,7 @@ def test_seeded_sampling_is_repeatable_and_independent_of_global_rng(device):
 
 
 def test_analysis_preserves_precision_and_returns_ood_scores_to_input_device(device):
-    values = torch.tensor([[0., 1.], [1., 2.], [2., 3.], [3., 4.]])
+    values = torch.tensor([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0], [3.0, 4.0]])
     detector = MahalanobisOODDetector().fit(values.to(device))
     expected = MahalanobisOODDetector().fit(values).score(values)
     scores = detector.score(values.to(device))
@@ -64,15 +69,15 @@ def test_analysis_preserves_precision_and_returns_ood_scores_to_input_device(dev
 
 
 def test_metrics_and_stacking_accept_accelerator_tensors(device):
-    simple = torch.tensor([0., 2., 4.], device=device)
+    simple = torch.tensor([0.0, 2.0, 4.0], device=device)
     complex_prediction = simple + 2
     target = 0.75 * simple + 0.25 * complex_prediction
     weight, mse = fit_convex_stacking_weight(simple, complex_prediction, target)
     assert weight == pytest.approx(0.25)
-    assert mse == pytest.approx(0.)
-    assert _metrics(target, target) == pytest.approx((1., 1., 0.))
-    assert _spearman(target, target) == pytest.approx(1.)
-    assert _average_precision(target, target > 2) == pytest.approx(1.)
+    assert mse == pytest.approx(0.0)
+    assert _metrics(target, target) == pytest.approx((1.0, 1.0, 0.0))
+    assert _spearman(target, target) == pytest.approx(1.0)
+    assert _average_precision(target, target > 2) == pytest.approx(1.0)
 
 
 def test_observation_noise_stays_on_device_and_only_changes_dynamic_features(device):

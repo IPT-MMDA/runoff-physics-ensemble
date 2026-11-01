@@ -1,21 +1,38 @@
 """Version-one HTTP contracts, derived from the shared configuration defaults."""
+
 from __future__ import annotations
 
+import types
+from collections.abc import Mapping
 from dataclasses import MISSING, fields
 from datetime import date
-from typing import Literal, Union, get_args, get_origin, get_type_hints
-from collections.abc import Mapping
-import types
+from typing import TYPE_CHECKING, Any, Literal, Union, get_args, get_origin, get_type_hints
 
-from pydantic import (BaseModel, ConfigDict, Field, StrictBool, StrictFloat,
-                      StrictInt, StrictStr, create_model)
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    create_model,
+)
 
 from .benchmarks import BenchmarkConfig
-from .regional import (BasinScopeConfig, HyperparameterConfig, ModelArchitectureConfig,
-                       TrainingStrategyConfig, PhysicsModelConfig, ExtremeEventConfig, ForecastConfig)
-from .estreams import ESTREAMS_DYNAMIC_FEATURES
 from .camels_ch_chem import DEFAULT_CAMELS_CH_CHEM_FEATURES
+from .estreams import ESTREAMS_DYNAMIC_FEATURES
 from .hyd_responses import DEFAULT_HYD_RESPONSES_FEATURES
+from .kan_case_study import CaseStudyConfig
+from .regional import (
+    BasinScopeConfig,
+    ExtremeEventConfig,
+    ForecastConfig,
+    HyperparameterConfig,
+    ModelArchitectureConfig,
+    PhysicsModelConfig,
+    TrainingStrategyConfig,
+)
 
 
 class Contract(BaseModel):
@@ -41,20 +58,22 @@ class HydropowerComparisonRequest(Contract):
     scenario: HydropowerEnergyRequest = Field(default_factory=HydropowerEnergyRequest)
 
 
-def configuration_model(cls):
+def configuration_model(cls: type[Any]) -> type[Contract]:
     hints = get_type_hints(cls)
-    definitions = {}
+    definitions: dict[str, Any] = {}
     for f in fields(cls):
-        default = ...
+        default: Any = ...
         if f.default is not MISSING:
             default = f.default
         elif f.default_factory is not MISSING:
             default = Field(default_factory=f.default_factory)
         definitions[f.name] = (strict_type(hints[f.name]), default)
-    return create_model(cls.__name__.removesuffix("Config") + "Request", __base__=Contract, **definitions)
+    return create_model(
+        cls.__name__.removesuffix("Config") + "Request", __base__=Contract, **definitions
+    )
 
 
-def strict_type(annotation):
+def strict_type(annotation: Any) -> Any:
     primitives = {int: StrictInt, float: StrictFloat, str: StrictStr, bool: StrictBool}
     if annotation in primitives:
         return primitives[annotation]
@@ -62,20 +81,32 @@ def strict_type(annotation):
     if origin in (Union, types.UnionType):
         return Union[tuple(strict_type(arg) for arg in args)]
     if origin is tuple:
-        return tuple[strict_type(args[0]), ...]
+        return types.GenericAlias(tuple, (strict_type(args[0]), Ellipsis))
     if origin in (dict, Mapping):
-        return dict[strict_type(args[0]), strict_type(args[1])]
+        return types.GenericAlias(dict, (strict_type(args[0]), strict_type(args[1])))
     return annotation
 
 
-Basins = configuration_model(BasinScopeConfig)
-Model = configuration_model(ModelArchitectureConfig)
-Strategy = configuration_model(TrainingStrategyConfig)
-Hyperparameters = configuration_model(HyperparameterConfig)
-Physics = configuration_model(PhysicsModelConfig)
-Extremes = configuration_model(ExtremeEventConfig)
-Forecast = configuration_model(ForecastConfig)
-Benchmark = configuration_model(BenchmarkConfig)
+# These generated classes have runtime-validated fields derived from the shared
+# dataclasses. Static consumers can use their common Pydantic contract methods.
+if TYPE_CHECKING:
+    Basins = Contract
+    Model = Contract
+    Strategy = Contract
+    Hyperparameters = Contract
+    Physics = Contract
+    Extremes = Contract
+    Forecast = Contract
+    Benchmark = Contract
+else:
+    Basins = configuration_model(BasinScopeConfig)
+    Model = configuration_model(ModelArchitectureConfig)
+    Strategy = configuration_model(TrainingStrategyConfig)
+    Hyperparameters = configuration_model(HyperparameterConfig)
+    Physics = configuration_model(PhysicsModelConfig)
+    Extremes = configuration_model(ExtremeEventConfig)
+    Forecast = configuration_model(ForecastConfig)
+    Benchmark = configuration_model(BenchmarkConfig)
 
 
 class DateRangeRequest(Contract):
@@ -116,9 +147,10 @@ class ExperimentRequest(Contract):
     skip_unusable_basins: StrictBool = False
 
 
-from .kan_case_study import CaseStudyConfig
-
-CaseStudyConfiguration = configuration_model(CaseStudyConfig)
+if TYPE_CHECKING:
+    CaseStudyConfiguration = Contract
+else:
+    CaseStudyConfiguration = configuration_model(CaseStudyConfig)
 
 
 class CaseStudyRequest(Contract):
@@ -143,9 +175,9 @@ class PavedSiteRequest(Contract):
     proposed_paved_fraction: float = Field(default=0.8, ge=0, le=1)
     pervious_runoff_coefficient: float = Field(default=0.25, ge=0, le=1)
     paved_runoff_coefficient: float = Field(default=0.9, ge=0, le=1)
-    connected_fraction: float = Field(default=1., ge=0, le=1)
-    storage_capacity_mm: float = Field(default=0., ge=0)
-    release_mm_day: float = Field(default=0., ge=0)
+    connected_fraction: float = Field(default=1.0, ge=0, le=1)
+    storage_capacity_mm: float = Field(default=0.0, ge=0)
+    release_mm_day: float = Field(default=0.0, ge=0)
     start_date: date | None = None
 
 

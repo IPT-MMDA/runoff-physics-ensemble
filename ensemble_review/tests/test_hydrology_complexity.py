@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import csv
-from datetime import date, timedelta
 import importlib.util
 import math
 import tempfile
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 
 import torch
@@ -34,9 +34,7 @@ def _logistic_series(rate: float, length: int = 600) -> torch.Tensor:
 
 class ComplexityEstimatorTests(unittest.TestCase):
     def test_delay_embedding_contract(self) -> None:
-        embedding = takens_delay_embedding(
-            torch.arange(8.0), embedding_dim=3, delay=2
-        )
+        embedding = takens_delay_embedding(torch.arange(8.0), embedding_dim=3, delay=2)
         self.assertEqual(embedding.shape, (4, 3))
         self.assertTrue(torch.equal(embedding[0], torch.tensor([0.0, 2.0, 4.0])))
 
@@ -53,9 +51,7 @@ class ComplexityEstimatorTests(unittest.TestCase):
         self.assertEqual(float(estimates[1, 1]), 1.0)
 
     def test_lyapunov_accepts_chaotic_logistic_divergence(self) -> None:
-        windows = torch.stack(
-            (_logistic_series(3.2), _logistic_series(4.0))
-        )[:, :, None]
+        windows = torch.stack((_logistic_series(3.2), _logistic_series(4.0)))[:, :, None]
         estimator = LyapunovComplexityEstimator(
             0,
             embedding_dim=3,
@@ -113,9 +109,7 @@ class ComplexityPipelineTests(unittest.TestCase):
         data = self._data()
         self.assertEqual(data.train.inputs.shape[1], 7)
         self.assertEqual(data.train.routing_inputs.shape[1], 21)
-        self.assertTrue(
-            torch.equal(data.train.inputs, data.train.routing_inputs[:, -7:])
-        )
+        self.assertTrue(torch.equal(data.train.inputs, data.train.routing_inputs[:, -7:]))
 
     @unittest.skipUnless(importlib.util.find_spec("ripser"), "ripser is optional")
     def test_consolidation_pipeline_trains_tda_route(self) -> None:

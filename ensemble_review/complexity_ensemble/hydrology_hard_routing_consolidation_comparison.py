@@ -5,7 +5,6 @@ from typing import Mapping
 import torch
 
 from .devices import randperm, resolve_device, seeded_generator
-
 from .hydrology import (
     HydrologyLosses,
     HydrologyRoutedOutput,
@@ -61,11 +60,7 @@ def hard_routed_losses(
     hard_weight = model.router.complex_weight(router_features, hard=True)
     # Straight-through routing preserves a binary forward assignment while letting
     # the trainable learned gate receive the same soft surrogate gradient as before.
-    routed_weight = (
-        hard_weight
-        + soft_routed.complex_weight
-        - soft_routed.complex_weight.detach()
-    )
+    routed_weight = hard_weight + soft_routed.complex_weight - soft_routed.complex_weight.detach()
     discharge = model._positive_discharge(
         torch.lerp(
             soft_routed.simple_raw,
@@ -78,8 +73,7 @@ def hard_routed_losses(
     physics = model.physics_residual(discharge, physical_inputs).square().mean()
     transition = 4.0 * soft_routed.complex_weight * (1.0 - soft_routed.complex_weight)
     interface = (
-        transition
-        * (soft_routed.simple_raw - soft_routed.complex_raw).square().squeeze(-1)
+        transition * (soft_routed.simple_raw - soft_routed.complex_raw).square().squeeze(-1)
     ).mean()
     routing = model.router.regularization(router_features)
     complex_usage = soft_routed.complex_weight.mean()
@@ -147,8 +141,7 @@ def train_hydrology_model_with_hard_routing_and_consolidation(
             epoch_total += float(losses.total.detach()) * len(indices)
         if verbose:
             print(
-                f"  training epoch {epoch + 1}/{epochs}: "
-                f"loss={epoch_total / len(inputs):.6f}",
+                f"  training epoch {epoch + 1}/{epochs}: loss={epoch_total / len(inputs):.6f}",
                 flush=True,
             )
 

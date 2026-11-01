@@ -2,6 +2,15 @@
 export const terminal = status => ["succeeded", "failed", "cancelled"].includes(status);
 export const pretty = key => key.replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
 export const finite = value => typeof value === "number" && Number.isFinite(value);
+export function runName(run) {
+  if (run.display_name) return run.display_name;
+  const model = run.config?.model?.complex_expert, approach = run.config?.strategy?.approach;
+  return model && approach ? `${model}_${approach}` : run.run_id;
+}
+export function runOptionLabel(run) {
+  const name = runName(run);
+  return name === run.run_id ? name : `${name} · ${run.run_id.slice(-6)}`;
+}
 export function configureBafuTask(config) {
   const next = structuredClone(config);
   if (next.benchmark.mode === "none") return next;
@@ -20,6 +29,9 @@ export function useBenchmarkCoverage(config, report) {
     target_basins: [...report.effective_targets],
     eligible_basins: [...new Set([...report.training_basins, ...report.effective_targets])],
   } };
+}
+export function automaticBafuRequest(body) {
+  return body.config.benchmark.mode === "none" ? body : { ...body, skip_unusable_basins: true };
 }
 export function basinCompatibilityLoaded(rows, mode = "none") {
   return mode === "none" || rows.every(row => typeof row.compatibility?.[mode]?.eligible === "boolean");

@@ -1,6 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { allPages, hanzePerformance, floodPerformance, floodMetricDefinitions, floodScoreColor, floodScoreText, basinAvailability, basinCompatibilityLoaded, coerce, configureBafuTask, envelope, meanByDate, useBenchmarkCoverage } from "../complexity_ensemble/studio/core.js";
+import { allPages, hanzePerformance, floodPerformance, floodMetricDefinitions, floodScoreColor, floodScoreText, basinAvailability, basinCompatibilityLoaded, coerce, configureBafuTask, automaticBafuRequest, runName, runOptionLabel, envelope, meanByDate, useBenchmarkCoverage } from "../complexity_ensemble/studio/core.js";
+
+test("run labels show model and approach and distinguish repeated experiments", () => {
+  const run = { run_id: 'experiment-abcdef', config: { model: { complex_expert: 'mlp' }, strategy: { approach: 'no_routing' } } };
+  assert.equal(runName(run), 'mlp_no_routing');
+  assert.equal(runOptionLabel(run), 'mlp_no_routing · abcdef');
+  assert.notEqual(runOptionLabel(run), runOptionLabel({ ...run, run_id: 'experiment-ghijkl' }));
+  assert.equal(runName({ run_id: 'legacy' }), 'legacy');
+});
+
+test("Run automatically audits BAFU without changing the requested cohort or CAMELS", () => {
+  for (const mode of ["bafu_only", "bafu_combined"]) {
+    const body = { dataset_id: "ch", config: { benchmark: { mode, strict_cohort: true },
+      basins: { target_basins: ["good", "conflicting"], training_scope: "targets_only" } } };
+    const request = automaticBafuRequest(body);
+    assert.equal(request.skip_unusable_basins, true);
+    assert.equal(request.config.benchmark.strict_cohort, true);
+    assert.deepEqual(request.config.basins.target_basins, ["good", "conflicting"]);
+    assert.equal(body.skip_unusable_basins, undefined);
+  }
+  const body = { config: { benchmark: { mode: "none" } } };
+  assert.equal(automaticBafuRequest(body), body);
+});
 
 test("BAFU drought task stays selected and CAMELS settings remain unchanged", () => {
   const config = { benchmark: { mode: "bafu_only", target: "daily_max", threshold_source: "official_return_level" },

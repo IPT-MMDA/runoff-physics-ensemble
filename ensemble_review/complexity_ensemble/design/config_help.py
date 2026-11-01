@@ -14,7 +14,7 @@ _CONFIG_HELP = {
         "the optional ripser dependency. Routing history must cover the model "
         "sequence and embedding; Lyapunov additionally needs enough history for "
         "its fit and neighbor exclusion. These settings affect soft/hard routing "
-        "and distillation, including a routed physics-distillation teacher.",
+        "and distillation.",
     ),
     "dates": (
         "Train, validation, and test dates",
@@ -49,19 +49,7 @@ _CONFIG_HELP = {
         "effective precipitation and previous discharge. Its residual contributes "
         "to the physics loss during training.",
     ),
-    "physics_optimization": (
-        "Physics optimization",
-        "The default uses the linear reservoir alone. KAN adds a learned correction "
-        "to the reservoir balance, selected for accuracy, robustness, a balance of "
-        "both, or agreement with a teacher model. KAN modes require target basins "
-        "in the training scope and the optional pykan dependency.",
-    ),
-    "physics_teacher": (
-        "Physics-distillation teacher",
-        "This approach supplies target predictions when Physics optimization is "
-        "set to KAN — physics distillation. The choice has no effect for other "
-        "physics modes.",
-    ),
+
 }
 
 

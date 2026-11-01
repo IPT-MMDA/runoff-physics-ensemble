@@ -1,0 +1,184 @@
+basin_id,gauge_name,training_basin,evaluation_target
+2009,Porte du Scex,True,True
+2011,Sion,True,True
+2016,Brugg,True,True
+2018,Mellingen,True,True
+2019,Brienzwiler,True,True
+2020,Bellinzona,True,True
+2024,Branson,True,True
+2029,Brügg-Aegerten,True,True
+2030,Thun,True,True
+2033,Ilanz,True,True
+2034,Payerne-Caserne d'aviation,True,True
+2044,Andelfingen,True,True
+2053,Martigny-Pont de Rossettan,True,True
+2056,Seedorf,True,True
+2063,Murgenthal,True,True
+2068,Riazzino,True,True
+2070,Emmenmatt,True,True
+2078,Le Prese,True,True
+2079,Le Prese,True,True
+2084,Ingenbohl,True,True
+2085,Hagneck,True,True
+2086,Loderio,True,True
+2087,Andermatt,True,True
+2091,Rheinfelden-Messstation,True,True
+2099,Zürich-Unterhard,True,True
+2102,Sarnen,True,True
+2104,Weesen-Biäsche,True,True
+2105,St. Moritzbad,True,True
+2106,Münchenstein-Hofmatt,True,True
+2109,Gsteig,True,True
+2110,Mühlau-Hünenberg,True,True
+2112,Appenzell,True,True
+2117,Le Châble-Villette,True,True
+2119,Fribourg,True,True
+2122,Moutier-La Charrue,True,True
+2125,Frauenthal,True,True
+2126,Wängi,True,True
+2132,Neftenbach,True,True
+2135,Bern-Schönau,True,True
+2139,St. Margrethen,True,True
+2141,Tiefencastel,True,True
+2143,Rekingen,True,True
+2150,Felsenbach,True,True
+2151,Oberwil,True,True
+2152,Luzern-Geissmattbrücke,True,True
+2155,Wiler-Limpachmündung,True,True
+2157,Gerlafingen,True,True
+2159,Belp-Mülimatt,True,True
+2160,Broc-Château d'en bas,True,True
+2161,Blatten bei Naters,True,True
+2167,Ponte Tresa-Rocchetta,True,True
+2170,Genève-Bout du Monde,True,True
+2174,Chancy-Aux Ripes,True,True
+2176,Zürich-Sihlhölzli,True,True
+2179,Thörishaus-Sensematt,True,True
+2181,Halden,True,True
+2185,Chur,True,True
+2187,Salez,True,True
+2199,Basel,True,True
+2200,Zweilütschinen,True,True
+2202,Liestal,True,True
+2203,Aigle,True,True
+2205,Untersiggenthal-Stilli,True,True
+2210,Ocourt,True,True
+2215,Laupen,True,True
+2219,Oberried / Lenk,True,True
+2232,Adelboden,True,True
+2239,Punt dal Gall,True,True
+2243,Baden-Limmatpromenade,True,True
+2244,Klusmatten,True,True
+2247,Sortie du lac des Brenets,True,True
+2251,Plaffeien-Schwyberg,True,True
+2252,Plaffeien-Schwyberg,True,True
+2256,Pontresina,True,True
+2262,Pontresina,True,True
+2263,La Punt-Chamues-ch,True,True
+2265,Tarasp,True,True
+2268,Gletsch,True,True
+2269,Blatten,True,True
+2276,Isenthal,True,True
+2282,Wasen-Kurzeneialp,True,True
+2283,Wasen-Riedbad,True,True
+2288,Neuhausen-Flurlingerbrücke,True,True
+2289,Basel-Rheinhalle,True,True
+2290,St-Sulpice,True,True
+2299,Erstfeld-Bodenberg,True,True
+2300,Euthal-Rüti,True,True
+2303,Jonschwil-Mühlau,True,True
+2304,Zernez-Punt la Drossa,True,True
+2305,Herisau-Zellersmühle,True,True
+2307,Sonceboz,True,True
+2308,Goldach-Bleiche,True,True
+2309,Horn-Farbmühle,True,True
+2312,Salmsach-Hungerbühl,True,True
+2321,Pregassona,True,True
+2327,Davos-Kriegsmatte,True,True
+2342,Brig,True,True
+2343,Huttwil-Häberenbad,True,True
+2346,Brig,True,True
+2347,Roveredo-Bacino di compenso,True,True
+2349,Chiasso-Ponte di Polenta,True,True
+2351,Visp,True,True
+2352,Linthal-Ausgleichsbecken KLL,True,True
+2355,Davos-Frauenkirch,True,True
+2356,Cavergno-Pontit,True,True
+2364,Piotta,True,True
+2366,La Rösa,True,True
+2368,Locarno-Solduno,True,True
+2369,Yvonand-La Mauguettaz,True,True
+2370,Le Noirmont-La Goule,True,True
+2371,Le Chenit-Frontière,True,True
+2372,Mollis-Linthbrücke,True,True
+2374,Mogelsberg-Aachsäge,True,True
+2378,Orbe-Le Chalet,True,True
+2386,Frauenfeld,True,True
+2387,Fürstenau,True,True
+2403,Cinuos-Chel,True,True
+2409,Eggiwil-Heidbüel,True,True
+2410,Ruggell,True,True
+2412,Vuippens-Château,True,True
+2414,Mosnang-Rietholz,True,True
+2415,Rheinsfelden,True,True
+2416,Hitzkirch-Richensee,True,True
+2417,Oberkirch,True,True
+2418,Tiefencastel,True,True
+2419,Reckingen,True,True
+2420,Lumino-Sassello,True,True
+2426,Mels,True,True
+2430,Somvitg-Encardens,True,True
+2432,Ecublens-Les Bois,True,True
+2433,Allaman-Le Coulet,True,True
+2434,Olten-Hammermühle,True,True
+2436,Alpnach-Chilch-Erli,True,True
+2437,Ecublens-Eschiens,True,True
+2446,Gampelen-Zihlbrücke,True,True
+2447,Sugiez,True,True
+2450,Zofingen,True,True
+2457,Ringgenberg-Goldswil,True,True
+2458,Valangin,True,True
+2461,Magliaso-Ponte,True,True
+2462,S-chanf,True,True
+2463,Bioggio-Campagna,True,True
+2467,Gümmenen,True,True
+2468,St. Gallen-Bruggen / Au,True,True
+2469,Hondrich,True,True
+2471,Murgenthal-Walliswil,True,True
+2473,Diepoldsau-Rietbrücke,True,True
+2474,Buseno,True,True
+2475,Bignasco-Ponte nuovo,True,True
+2477,Zug-Letzi,True,True
+2478,Soyhières-Bois du Treuil,True,True
+2480,Boudry,True,True
+2481,Buochs-Flugplatz,True,True
+2485,Boncourt-Frontière,True,True
+2486,Vevey-Copet,True,True
+2487,Werthenstein-Chappelboden,True,True
+2488,Latterbach,True,True
+2490,Dardagny-Les Granges,True,True
+2491,Bürglen-Galgenwäldli,True,True
+2493,Gland-Route Suisse,True,True
+2494,Pollegio-Campagna,True,True
+2497,Nebikon,True,True
+2498,Castrisch,True,True
+2500,Ittigen,True,True
+2602,Domat/Ems,True,True
+2603,Langnau,True,True
+2604,Biberbrugg,True,True
+2605,Lavertezzo-Campiöi,True,True
+2606,Genève-Halle de l'ìle,True,True
+2607,Oberwald,True,True
+2608,Neuenkirch,True,True
+2609,Einsiedeln,True,True
+2610,Vicques,True,True
+2612,Lavertezzo,True,True
+2613,Weil-Palmrainbrücke ( D ),True,True
+2617,Müstair,True,True
+2620,Soglio,True,True
+2629,Agno,True,True
+2630,Sion,True,True
+2631,Hinterrhein,True,True
+2634,Emmen,True,True
+2635,Einsiedeln-Gross,True,True
+2640,Delémont,True,True

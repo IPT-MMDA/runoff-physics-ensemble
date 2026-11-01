@@ -77,12 +77,13 @@ def basin_compatibility(catalog, root):
 
 
 def load_observations(root, basin_ids, start, end, *, target='daily_mean', areas=None,
-                      release_states=(2, 3), day_timezone='Europe/Zurich'):
+                      release_states=(2, 3), day_timezone='Europe/Zurich', skip_invalid_basins=False):
     """Read monthly partitions once for the whole cohort, selecting only Q.
 
     Export timestamps represent UTC interval starts. Convert to the configured
     local calendar before taking a date; truncating 23:00 UTC shifts Swiss days.
     Conflicting duplicates fail rather than silently selecting one revision.
+    Audits can instead exclude the entire affected basin and retain the reason.
     """
     if target not in {'daily_mean', 'daily_max'}:
         raise ValueError('BAFU target must be daily_mean or daily_max')
@@ -93,7 +94,7 @@ def load_observations(root, basin_ids, start, end, *, target='daily_mean', areas
     if missing:
         raise ValueError('Positive catchment area (km2) required for BAFU stations: ' + ', '.join(sorted(missing)))
     zone = ZoneInfo(day_timezone)
-    rows = {basin: {} for basin in wanted}; sources = []
+    rows = {basin: {} for basin in wanted}; sources = []; failures = {}
     for path in sorted((root / 'data').glob(f'*/water_observations_*_data_{aggregation}_*.csv.gz')):
         # Include adjacent calendar years because timestamps are UTC.
         try:
@@ -106,7 +107,7 @@ def load_observations(root, basin_ids, start, end, *, target='daily_mean', areas
         with gzip.open(path, 'rt', encoding='utf-8-sig', newline='') as source:
             for row in csv.DictReader(source):
                 basin = row['station_no']
-                if basin not in wanted or row['parameter_name'] != 'Q':
+                if basin not in wanted or basin in failures or row['parameter_name'] != 'Q':
                     continue
                 # BAFU exports include missing observations with blank quality
                 # flags and/or discharge. They are gaps, not numeric values.
@@ -114,20 +115,28 @@ def load_observations(root, basin_ids, start, end, *, target='daily_mean', areas
                 value_text = (row['value'] or '').strip()
                 if not release_state or not value_text:
                     continue
-                if int(release_state) not in release_states:
+                try:
+                    if int(release_state) not in release_states:
+                        continue
+                    stamp = datetime.fromisoformat(row['timestamp'].replace('Z', '+00:00'))
+                    day = stamp.replace(tzinfo=timezone.utc).astimezone(zone).date() if stamp.tzinfo is None else stamp.astimezone(zone).date()
+                    if not start <= day <= end:
+                        continue
+                    if row['unit_symbol'] not in {'m³/s', 'm3/s'}:
+                        raise ValueError(f'Unexpected BAFU Q unit for {basin}')
+                    value = float(value_text)
+                    if not math.isfinite(value) or value < 0:
+                        continue
+                    value *= 86.4 / areas[basin]
+                    if day in rows[basin] and rows[basin][day] != value:
+                        raise ValueError(f'Conflicting BAFU Q values for {basin} on {day}')
+                except (ValueError, TypeError, OverflowError) as error:
+                    if not skip_invalid_basins:
+                        raise
+                    failures[basin] = (str(error) if str(error).startswith(('Conflicting BAFU', 'Unexpected BAFU'))
+                                       else 'Invalid BAFU discharge value, timestamp or release state')
+                    rows[basin].clear()
                     continue
-                if row['unit_symbol'] not in {'m³/s', 'm3/s'}:
-                    raise ValueError(f'Unexpected BAFU Q unit for {basin}')
-                stamp = datetime.fromisoformat(row['timestamp'].replace('Z', '+00:00'))
-                day = stamp.replace(tzinfo=timezone.utc).astimezone(zone).date() if stamp.tzinfo is None else stamp.astimezone(zone).date()
-                if not start <= day <= end:
-                    continue
-                value = float(value_text)
-                if not math.isfinite(value) or value < 0:
-                    continue
-                value *= 86.4 / areas[basin]
-                if day in rows[basin] and rows[basin][day] != value:
-                    raise ValueError(f'Conflicting BAFU Q values for {basin} on {day}')
                 rows[basin][day] = value; used = True
         if used:
             sources.append({'file': str(path.relative_to(root)), 'sha256': file_digest(path)})
@@ -139,7 +148,8 @@ def load_observations(root, basin_ids, start, end, *, target='daily_mean', areas
                 torch.empty(len(days), 0), (), basin, 'CH')
     return series, {'adapter': 'bafu_q_v1', 'target': target, 'day_timezone': day_timezone,
                     'release_states': list(release_states), 'area_source': 'CAMELS-CH metadata; not a model predictor in BAFU-only mode',
-                    'areas_km2': {b: areas[b] for b in sorted(wanted)}, 'files': sources}
+                    'areas_km2': {b: areas[b] for b in sorted(wanted)}, 'files': sources,
+                    'observation_load_failures': failures}
 
 
 def merge_predictors(observed, predictors):

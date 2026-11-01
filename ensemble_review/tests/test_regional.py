@@ -395,44 +395,13 @@ def test_stacking_rejects_excluded_target_training_scope():
         config.validate()
 
 
-def test_kan_physics_rejects_excluded_target_training_scope():
+def test_regional_kan_correction_has_a_clear_migration_error():
     config = RegionalExperimentConfig(
-        ".", BasinScopeConfig(("target",), "exclude_targets"), _dates(),
+        ".", BasinScopeConfig(("target",), "all_basins"), _dates(),
         physics=PhysicsModelConfig(optimization_mode="balanced"),
     )
-
-    with pytest.raises(ValueError, match="requires target basins in training"):
+    with pytest.raises(ValueError, match="separate KAN case study"):
         config.validate()
-
-
-def test_numeric_kan_physics_distills_selected_teacher():
-    pytest.importorskip("kan")
-    series = {"target": _series("target")}
-    catalog = CAMELSCHCatalog(".", [BasinCatalogRecord("target")])
-    config = RegionalExperimentConfig(
-        ".", BasinScopeConfig(("target",), "targets_only"), _dates(),
-        ModelArchitectureConfig(
-            complex_expert="mlp", simple_expert="fourier",
-            mlp_widths=(8,), fourier_frequencies=4,
-        ),
-        TrainingStrategyConfig("static_50_50", 1, 1, 1, 1),
-        HyperparameterConfig(sequence_length=7, batch_size=128),
-        PhysicsModelConfig(
-            optimization_mode="distillation", distillation_teacher="hard_routing",
-            kan_candidates=1, kan_steps=1, symbolic=False,
-        ),
-    )
-
-    result = run_regional_experiment(config, catalog=catalog, series_by_basin=series)
-
-    assert result.predictions and not result.failures
-    assert result.routing_diagnostics["physics_distillation_teacher"] == "hard_routing"
-    assert result.routing_diagnostics["kan_selected_candidate_indices"] == [0]
-    assert "delta_q =" in result.routing_diagnostics["kan_selected_formulas"][0]
-    for split in ("train", "validation", "test"):
-        trace = result.loss_traces[f"kan_standalone_{split}_observation_mse"]
-        assert len(trace) == 1
-        assert torch.isfinite(torch.tensor(trace)).all()
 
 
 def test_gradio_values_map_to_the_correct_configuration_fields():
@@ -453,7 +422,7 @@ def test_gradio_values_map_to_the_correct_configuration_fields():
     assert config.extremes.value == 0.9
 
 
-def test_gradio_values_include_kan_physics_controls():
+def test_gradio_retired_slots_do_not_enable_old_kan_workflow():
     values = [
         "2001-01-08", "2001-02-02", "2001-02-03", "2001-02-12",
         "2001-02-13", "2001-03-01", "hard_routing", "mlp", "fourier",
@@ -466,11 +435,7 @@ def test_gradio_values_include_kan_physics_controls():
 
     config = _config_from_ui_values("/data", ["target"], "targets_only", values)
 
-    assert config.physics.optimization_mode == "distillation"
-    assert config.physics.distillation_teacher == "static_50_50"
-    assert config.physics.kan_candidates == 4
-    assert config.physics.robustness_noise_levels == (0.03, 0.1)
-    assert config.physics.symbolic is False
+    assert config.physics.optimization_mode == "none"
 
     configured = _config_from_ui_values(
         "/data", ["target"], "targets_only",

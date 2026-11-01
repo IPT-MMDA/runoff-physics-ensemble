@@ -10,7 +10,7 @@ import tempfile
 
 from .regional import (CAMELSCHCatalog, DateRange, ExperimentResult, ExtremeEventConfig,
                        PredictionRecord, run_regional_experiment)
-from .result_registry import discover_runs, load_run, save_run
+from .result_registry import discover_runs, load_run, save_run, run_display_name
 from .rainfall_replay import event_choices, make_replay
 from .paved_scenario import run_paved_site_scenario
 from .serialization import json_safe, public_config
@@ -149,6 +149,7 @@ def result_summary(run):
     config = public_config(run.config)
     requested = config.pop("requested_config", None)
     return json_safe({"run_id": run.run_id, "created_at": run.created_at,
+                      "display_name": run_display_name(run.config),
                       "config": config, "requested_config": requested,
                       "aggregate_metrics": run.aggregate_metrics,
                       "per_basin_metrics": run.per_basin_metrics,

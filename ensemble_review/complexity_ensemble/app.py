@@ -382,11 +382,6 @@ def _parse_seeds(value: str) -> tuple[int, ...]:
     except ValueError as error: raise ValueError("seeds must be comma-separated integers") from error
 
 
-def _parse_floats(value: str) -> tuple[float, ...]:
-    try: return tuple(float(item.strip()) for item in value.split(",") if item.strip())
-    except ValueError as error: raise ValueError("values must be comma-separated numbers") from error
-
-
 def _config_from_ui_values(
     data_root: str | Path, target_values, scope_value, values,
     *, estreams_root: str | Path | None = None,
@@ -440,24 +435,7 @@ def _config_from_ui_values(
             lyapunov_fit_horizon=int(values[71]) if len(values) > 71 else 20,
             lyapunov_min_r2=float(values[72]) if len(values) > 72 else 0.8,
         ),
-        PhysicsModelConfig(
-            optimization_mode=values[36] if len(values) > 36 else "none",
-            distillation_teacher=values[37] if len(values) > 37 else "hard_routing",
-            kan_candidates=int(values[38]) if len(values) > 38 else 3,
-            kan_steps=int(values[39]) if len(values) > 39 else 50,
-            kan_grid=int(values[40]) if len(values) > 40 else 3,
-            kan_spline_order=int(values[41]) if len(values) > 41 else 3,
-            kan_additive_nodes=int(values[42]) if len(values) > 42 else 2,
-            kan_multiplicative_nodes=int(values[43]) if len(values) > 43 else 1,
-            kan_sparsity_weight=float(values[44]) if len(values) > 44 else 1e-3,
-            robustness_noise_levels=(
-                _parse_floats(values[45]) if len(values) > 45 else (0.05, 0.1, 0.2)
-            ),
-            robustness_accuracy_tolerance=(
-                float(values[46]) if len(values) > 46 else 0.05
-            ),
-            symbolic=bool(values[47]) if len(values) > 47 else True,
-        ),
+        PhysicsModelConfig(),
         ExtremeEventConfig(
             values[28], values[32],
             float(values[33]) if values[33] is not None else None,
@@ -540,6 +518,9 @@ def build_app(
         )
 
     with gr.Blocks(title="Regional hydrology and land assessment platform with heterogeneous ensembles") as app:
+        # Reserve the retired fields' positions in the existing UI adapter;
+        # these are constant internal values, with no controls or training effect.
+        retired_physics_slots = [gr.State(None) for _ in range(12)]
         token_state = gr.State(None)
         experiment_state = gr.State(None)
         gr.Markdown("# Regional hydrology and land assessment platform with heterogeneous ensembles")
@@ -589,26 +570,8 @@ def build_app(
             with gr.Row():
                 gr.Dropdown([("Linear reservoir water balance","linear_reservoir")],value="linear_reservoir",label="Physics backbone",interactive=False)
                 config_info(gr, "physics_backbone")
-            with gr.Row():
-                physics_optimization=gr.Radio([
-                    ("Linear reservoir only", "none"),
-                    ("KAN — maximum accuracy", "accuracy"),
-                    ("KAN — maximum robustness", "robustness"),
-                    ("KAN — balanced", "balanced"),
-                    ("KAN — physics distillation", "distillation"),
-                ], value="none", label="Physics optimization")
-                config_info(gr, "physics_optimization")
-            with gr.Row():
-                physics_teacher=gr.Dropdown([
-                    ("Morse soft routing", "soft_routing"),
-                    ("Morse hard routing", "hard_routing"),
-                    ("Existing expert distillation", "distillation"),
-                    ("Complex expert only", "no_routing"),
-                    ("Static 50/50", "static_50_50"),
-                    ("OOD fallback", "ood_fallback"),
-                    ("Validation stacking", "stacking"),
-                ], value="hard_routing", label="Physics-distillation teacher")
-                config_info(gr, "physics_teacher")
+        from .kan_case_study_ui import build_case_study_tab
+        build_case_study_tab(gr, catalog, choices, results_dir / "kan_case_study", executor=executor)
         with gr.Tab("Data and features"):
             gr.Markdown(
                 "CAMELS-CH daily hydrology is the required base dataset. Optional datasets "
@@ -809,16 +772,6 @@ def build_app(
                 rbf_centers=gr.Number(32,precision=0,label="RBF centers"); fourier_frequencies=gr.Number(32,precision=0,label="Fourier frequencies")
                 ood_quantile=gr.Number(.99,label="OOD training-score quantile")
                 ood_shrinkage=gr.Number(.1,label="OOD covariance shrinkage")
-                kan_candidates=gr.Number(3,precision=0,label="KAN candidate seeds")
-                kan_steps=gr.Number(50,precision=0,label="KAN training steps")
-                kan_grid=gr.Number(5,precision=0,label="KAN spline grid")
-                kan_order=gr.Number(5,precision=0,label="KAN spline order")
-                kan_additive=gr.Number(3,precision=0,label="KAN additive nodes")
-                kan_multiplicative=gr.Number(2,precision=0,label="KAN multiplication nodes")
-                kan_sparsity=gr.Number(1e-3,label="KAN sparsity weight")
-                kan_noise_levels=gr.Textbox("0.2",label="Robustness noise levels")
-                kan_accuracy_tolerance=gr.Number(.05,label="Robustness clean-AP tolerance")
-                kan_symbolic=gr.Checkbox(True,label="Extract symbolic KAN equation")
         with gr.Tab("Task"):
             extreme_mode=gr.Radio([
                 ("Daily discharge forecasting", "none"),
@@ -1030,7 +983,7 @@ def build_app(
             leaderboard = gr.Dataframe(
                 headers=[
                     "run_id", "created_at", "approach", "complex", "simple", "epochs",
-                    "KAN", "NSE", "KGE", "RMSE (mm/day)", "physics error",
+                    "Legacy physics mode", "NSE", "KGE", "RMSE (mm/day)", "physics error",
                     "parameters", "runtime (s)",
                 ],
                 value=leaderboard_rows(saved_runs), interactive=False,
@@ -1098,7 +1051,7 @@ predictors; discharge remains the prediction target.
   use one expert, average the experts, fall back to the simple expert for
   out-of-distribution inputs, or fit a blend on validation data.
 - **Physics:** a linear reservoir water balance supplies a training constraint.
-  Optional KAN optimization learns a correction to that balance.
+  The separate KAN case study explores symbolic transfer to low-data basins.
 
 ### What you can inspect
 
@@ -1325,7 +1278,7 @@ the leaderboard lets you revisit and compare saved runs.
                         y=values, mode="lines+markers", name=f"{side}: {phase}",
                         line={"dash": dash},
                     )
-            losses.update_layout(title="Training and standalone KAN traces", xaxis_title="Step")
+            losses.update_layout(title="Training traces", xaxis_title="Step")
             return (
                 f"Comparing `{run_a.run_id}` with `{run_b.run_id}`.",
                 table, aggregate, basin, losses,
@@ -1618,7 +1571,7 @@ the leaderboard lets you revisit and compare saved runs.
         def refresh_result_views(basin, result):
             return refresh_result(basin, result)[1:]
 
-        inputs=[targets,scope,train_start,train_end,val_start,val_end,test_start,test_end,approach,complex_expert,simple_expert,epochs,sequence,seeds,batch,learning_rate,noise,percentile,temperature,physics_weight,interface_weight,teacher_epochs,distill_epochs,consolidation_epochs,mlp_widths,mamba_hidden,mamba_layers,mamba_ff,rbf_centers,fourier_frequencies,extreme_mode,routing_weight,compute_weight,device,definition,extreme_value,ood_quantile,ood_shrinkage,physics_optimization,physics_teacher,kan_candidates,kan_steps,kan_grid,kan_order,kan_additive,kan_multiplicative,kan_sparsity,kan_noise_levels,kan_accuracy_tolerance,kan_symbolic,use_estreams,estreams_path,estreams_features,use_camels_chem,camels_chem_path,camels_chem_features,forecast_mode,horizon_days,event_types,high_quantile,low_quantile,rise_quantile,minimum_days,pulse_gap_days,minimum_basins,fall_quantile,complexity_method,routing_context,embedding_dim,embedding_delay,ph_min_persistence,ph_score,lyapunov_theiler,lyapunov_horizon,lyapunov_r2,camels_state_features,use_hyd_responses,hyd_responses_path,hyd_responses_features,hyd_responses_static,drought_definition,drought_smoothing,drought_quantile,drought_calendar_window,drought_minimum_days]
+        inputs=[targets,scope,train_start,train_end,val_start,val_end,test_start,test_end,approach,complex_expert,simple_expert,epochs,sequence,seeds,batch,learning_rate,noise,percentile,temperature,physics_weight,interface_weight,teacher_epochs,distill_epochs,consolidation_epochs,mlp_widths,mamba_hidden,mamba_layers,mamba_ff,rbf_centers,fourier_frequencies,extreme_mode,routing_weight,compute_weight,device,definition,extreme_value,ood_quantile,ood_shrinkage,*retired_physics_slots,use_estreams,estreams_path,estreams_features,use_camels_chem,camels_chem_path,camels_chem_features,forecast_mode,horizon_days,event_types,high_quantile,low_quantile,rise_quantile,minimum_days,pulse_gap_days,minimum_basins,fall_quantile,complexity_method,routing_context,embedding_dim,embedding_delay,ph_min_persistence,ph_score,lyapunov_theiler,lyapunov_horizon,lyapunov_r2,camels_state_features,use_hyd_responses,hyd_responses_path,hyd_responses_features,hyd_responses_static,drought_definition,drought_smoothing,drought_quantile,drought_calendar_window,drought_minimum_days]
         prepare = run.click(lambda: CancellationToken(), outputs=token_state, queue=False)
         scenario_prepare = run_scenario_experiment.click(
             lambda: (CancellationToken(), True),

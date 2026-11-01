@@ -7,12 +7,12 @@
   <title>Runoff — Research workspace</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='2.4' fill='%2300BFFF'/%3E%3Cpath d='M8 24 Q14 10 20 22 T33 16 M8 30 Q14 16 20 28 T33 22' fill='none' stroke='%23202328' stroke-width='3'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/studio-assets/style.css?v=fixed-sky-blue-1">
-  <script type="module" src="/studio-assets/app.js?v=fixed-sky-blue-1"></script>
+  <script type="module" src="/studio-assets/app.js?v=hydropower-run-names-2"></script>
 </head>
 <body>
   <header class="header">
     <a class="brand" href="#experiments" aria-label="Runoff home"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M5 24 Q12 8 20 22 T36 15 M5 32 Q12 16 20 30 T36 23"/></svg><span>runoff<span class="brand-dot">.</span></span><span class="brand-label">RESEARCH STUDIO</span></a>
-    <nav aria-label="Workspace"><a href="#experiments" class="active">Workspace</a><a href="#runs">Run library</a><a href="#compare">Compare</a><a href="#replay">Replay</a><a href="#impact">Impact</a><a href="#hydropower">Hydropower</a></nav>
+    <nav aria-label="Workspace"><a href="#experiments" class="active">Workspace</a><a href="#runs">Run library</a><a href="#compare">Compare</a><a href="#replay">Replay</a><a href="#impact">Impact</a><a href="#hydropower">Hydropower</a><a href="#kan-case-study">KAN case study</a></nav>
     <button class="connection" id="connection"><span class="status-dot"></span><span id="connection-label">Connecting</span><span aria-hidden="true">↗</span></button>
   </header>
   <main>
@@ -25,7 +25,9 @@
           <div class="dataset-row"><label class="field grow">Dataset<select id="dataset"><option value="">Loading datasets…</option></select></label><button id="validate-dataset" class="icon-button" title="Validate dataset" aria-label="Validate dataset">✓</button></div>
           <label class="field">Data source<select id="data-source"><option value="none">CAMELS-CH</option><option value="bafu_only">BAFU only</option><option value="bafu_combined">BAFU + CAMELS predictors</option></select></label>
           <p id="source-hint" class="field-hint" role="status"></p>
-          <div class="map-wrap"><canvas id="basin-map" aria-label="Catchment map. Use the searchable list below to select catchments with a keyboard." role="img"></canvas><div class="map-label"><span class="status-dot"></span> CATCHMENT ATLAS</div><div id="map-empty" class="map-empty">Connect a registered dataset<br>to explore its catchments.</div><div class="map-legend"><span><i></i> Available</span><span><i></i> Selected</span></div></div>
+          <div class="catchment-preset"><button id="select-hydropower-50" type="button" class="button secondary" disabled>Hydropower · 50 catchments</button><p id="catchment-preset-status" class="field-hint" role="status" aria-live="polite">A fixed selection of 50 catchments matched to hydropower plants. Sets training scope to prediction targets only for faster iterations.</p></div>
+          <div class="map-wrap"><canvas id="basin-map" aria-label="Catchment map. Use the searchable list below to select catchments with a keyboard." role="img"></canvas><div class="map-label"><span class="status-dot"></span> CATCHMENT ATLAS</div><div id="map-empty" class="map-empty">Connect a registered dataset<br>to explore its catchments.</div><div class="map-legend"><span><i></i> Available</span><span><i></i> Selected · small basins marked by dots</span></div></div>
+          <p class="subtle">Catchments show the full upstream drainage area and can overlap. Hover to identify a basin; map clicks choose the smallest eligible catchment at that point. Use the list to select larger overlapping catchments.</p>
           <div class="basin-tools"><input id="basin-search" type="search" placeholder="Find a catchment by name or ID" aria-label="Search catchments"><button id="select-all" class="text-button">Select all</button><button id="clear-basins" class="text-button">Clear</button></div>
           <div id="basin-list" class="basin-list" role="group" aria-label="Prediction targets"></div>
           <label class="field scope-field">Training scope<select id="scope"><option value="exclude_targets">All catchments except prediction targets</option><option value="all_basins">All eligible catchments</option><option value="targets_only">Prediction targets only</option></select></label>
@@ -34,6 +36,7 @@
           <form id="experiment-form"><div id="configuration"></div><div class="config-actions"><button type="button" id="export-config" class="text-button">↓ Export setup</button><label class="text-button import-label">↑ Import setup<input id="import-config" type="file" accept="application/json,.json" hidden></label><button type="button" id="reset-config" class="text-button">Reset</button></div><div class="launch-area"><label class="check"><input id="save-leaderboard" type="checkbox"> Save to shared leaderboard</label><div class="launch-buttons"><button type="button" id="validate-config" class="button secondary">Check setup</button><button id="launch" type="submit" class="button primary" disabled>Run experiment <span>↗</span></button></div></div></form>
         </section>
       </div>
+      <section id="basin-selection-audit" class="panel" hidden aria-live="polite"><h3>BAFU basin selection</h3><p id="basin-selection-summary"></p><details><summary>Skipped basins and reasons</summary><div id="basin-selection-exclusions" class="data-output"></div></details></section>
       <section class="job-panel" id="job-panel" hidden aria-live="polite"><div><div class="eyebrow" id="job-kind">EXPERIMENT</div><h3 id="job-title">Waiting for the worker</h3><p id="job-message"></p><code id="job-id"></code></div><div class="job-progress"><div><span id="job-percent">0%</span><button class="text-button" id="cancel-job">Cancel job</button></div><progress id="progress" max="1" value="0"></progress><p class="subtle">You can browse the workspace while this job runs.</p></div></section>
     </section>
     <section id="runs" class="view" hidden><div class="page-intro"><div class="eyebrow">RESEARCH / RUN LIBRARY</div><h1>Every run, a new perspective<span class="accent-dot">.</span></h1><p>Revisit predictions, inspect the learning, and take your findings further.</p></div><div class="section-toolbar"><div class="inline"><input id="run-search" type="search" placeholder="Search runs or approaches" aria-label="Search runs"><button id="refresh-runs" class="button secondary">Refresh</button></div><span id="run-count" class="subtle"></span></div><div id="runs-list" class="run-grid"></div><button id="more-runs" class="button secondary" hidden>Load more runs</button><section id="run-detail" class="panel" hidden><div class="panel-heading"><div><div class="eyebrow">RESULTS / <span id="detail-id"></span></div><h3 id="run-title">From rainfall to response</h3></div><div class="inline"><label class="field">Catchment<select id="result-basin"></select></label><label class="field">Forecast lead<select id="result-lead"></select></label></div></div><div id="run-warnings" class="notice" hidden></div><div id="metric-cards" class="metric-grid"></div><div id="event-metrics" class="metric-grid" hidden></div><section id="flood-performance" class="chart-card" hidden>
@@ -62,15 +65,106 @@
     <section id="compare" class="view" hidden><div class="page-intro"><div class="eyebrow">RESEARCH / COMPARISONS</div><h1>Make the difference visible<span class="accent-dot">.</span></h1><p>Compare two experiments and inspect how their metrics change.</p></div><section class="panel"><div class="form-row"><label class="field grow">Baseline run<select id="compare-a" class="run-picker"></select></label><span class="versus">→</span><label class="field grow">Candidate run<select id="compare-b" class="run-picker"></select></label><button id="compare-button" class="button primary">Compare runs ↗</button></div><div id="comparison-output" class="data-output empty-state">Select two runs to compare their aggregate and per-catchment metrics.</div></section></section>
     <section id="replay" class="view" hidden><div class="page-intro"><div class="eyebrow">RESEARCH / RAINFALL REPLAY</div><h1>Follow the water<span class="accent-dot">.</span></h1><p>Step through a rainfall episode and the catchment’s predicted response.</p></div><section class="panel"><div class="form-row"><label class="field grow">Experiment<select id="replay-run" class="run-picker"></select></label><label class="field grow">Catchment<select id="replay-basin"></select></label><label class="field short">Days<input id="replay-days" type="number" min="1" max="90" value="14"></label><button id="find-episodes" class="button secondary">Find episodes</button></div><div class="form-row"><label class="field grow">Rainfall episode<select id="replay-episode"><option value="">Find episodes to begin</option></select></label><button id="load-replay" class="button primary">Explore episode ↗</button><button id="export-gif" class="button secondary">↓ Export GIF</button></div><div id="replay-output" hidden><div class="replay-controls"><button id="replay-play" class="button secondary">Play</button><input id="replay-day" type="range" min="1" max="14" value="1" aria-label="Replay day"><span id="replay-date"></span></div><div id="replay-metrics" class="metric-grid"></div><div class="chart-grid"><div class="chart-card"><h4>Rainfall & atmospheric demand <span>mm / day</span></h4><div id="replay-weather" class="chart"></div></div><div class="chart-card"><h4>Catchment response <span>mm / day</span></h4><div id="replay-flow" class="chart"></div></div></div><details><summary>Daily forecast inputs and teaching bucket</summary><p class="subtle">The bucket is an uncalibrated illustration, separate from trained model storage.</p><div id="replay-snapshot" class="data-output"></div></details></div></section></section>
     <section id="impact" class="view" hidden><div class="page-intro"><div class="eyebrow">RESEARCH / IMPACT SCENARIOS</div><h1>Explore a different future<span class="accent-dot">.</span></h1><p>Compare baseline discharge with a daily paved-site and retention scenario.</p></div><section class="panel"><form id="scenario-form"><div class="form-row"><label class="field grow">Experiment<select id="impact-run" class="run-picker"></select></label><label class="field grow">Catchment<select id="impact-basin"></select></label></div><div id="scenario-fields" class="fields-grid"></div><p class="subtle">Fractions range from 0 to 1. This is a user-defined daily scenario, not a calibrated land-use forecast.</p><button class="button primary" type="submit">Compare scenario ↗</button></form><div id="scenario-output" class="data-output"></div><div id="scenario-chart" class="chart"></div></section></section>
+    <section id="kan-case-study" class="view" hidden>
+      <div class="page-intro"><div class="eyebrow">RESEARCH / LOW-DATA TRANSFER</div><h1>Discover a shared relationship<span class="accent-dot">.</span></h1><p>Distil a source-trained neural runoff process into a symbolic approximation, then calibrate three local parameters in data-scarce catchments.</p></div>
+      <section class="panel"><p>Snow and water storage evolve explicitly. KAN approximates the teacher’s daily runoff fraction; its equation structure is frozen before target adaptation. Source, source-validation and target catchments must be disjoint. This tests symbolic transfer, without claiming discovery of a universal physical law.</p>
+      <p class="subtle">This study uses CAMELS-CH. Complete daily weather, including spin-up, is required. Missing discharge labels are supported. Low-data regimes use the first N available training-period discharge labels; all other target discharge labels are hidden during calibration. Weather drives continuous simulation without discharge assimilation. Results are hindcasts with observed weather.</p>
+      <form id="kan-form" novalidate><label class="field">Dataset<select id="kan-dataset"></select></label>
+      <details open><summary>Date periods · availability shown separately for each split</summary><div id="kan-dates" class="fields-grid"></div></details>
+      <h3>Select comparison models</h3><p class="subtle">Each checked variant is a separate model. source_target trains on sources; target_target trains on budgeted targets; mixed_target trains on both. All predict the same target test dates. kan_pure uses the frozen source-derived equation; kan_tuned calibrates its three local coefficients. kan_complex discovers its own equation with an MLP teacher of at least 24 hidden units trained for at least 50 epochs, at least six candidates, and added x³/abs functions, then calibrates the same three local coefficients. Its KAN size uses the settings below. Neural inputs use weather and calendar history, without observed discharge.</p><div id="kan-models"></div>
+      <div id="kan-budgets" class="fields-grid"></div><p class="subtle">You choose which catchments are sources and targets. Use counts, gaps and seasonal coverage as evidence for your definition of high or low data. Default budgets apply to targets unless you set a separate budget below. The platform checks data sufficiency and cohort separation.</p>
+      <button id="kan-scan" class="button secondary" type="button">Scan catchment availability before choosing cohorts</button><p id="kan-coverage-status" role="status">Set the dates and budgets, then scan available and planned-used observations for train, validation and test.</p>
+      <div class="form-row"><label class="field grow">Find catchment<input id="kan-coverage-search" type="search" placeholder="Name or ID"></label><label class="field">Your assigned role<select id="kan-coverage-filter"><option value="">All catchments</option><option value="source">Source</option><option value="validation">Source-validation</option><option value="target">Target</option><option value="unassigned">Unassigned</option><option value="conflict">Conflicting roles</option></select></label></div><p class="subtle">Available counts use the dates selected above. Used counts depend on the assigned role: sources use training labels; source-validation uses validation labels; targets use their calibration budget and test labels for scoring. Multiple target budgets mean separate runs. A missing required split is flagged in Readiness.</p><div id="kan-coverage-table" class="data-output"></div>
+      <h3>Assign catchment roles yourself</h3><p class="subtle">Select sources, source-validation and targets manually. Any catchment can fill any role when it has enough data for that role. Scanning adds counts to the lists and preserves your selections. Tick a checkbox to include a catchment and untick it to remove it. Selections stay checked when you move between roles or filter the lists.</p><div id="kan-cohorts" class="fields-grid"></div><p id="kan-role-summary" role="status"></p><h3>Choose each target’s local data budget</h3><p class="subtle">Select targets above to set their calibration budgets individually, for example 30, 60, 90. Leave a field blank to use the default budgets. A target with a long record can still be studied using a small local budget.</p><div id="kan-target-budgets" class="fields-grid"></div>
+      <details><summary>Teacher, KAN and local calibration</summary><div id="kan-settings" class="fields-grid"></div></details>
+      <div class="form-row"><button id="kan-validate" class="button secondary" type="button">Check cohorts & coverage</button><button id="kan-launch" class="button primary" type="submit">Run case study ↗</button></div></form>
+      <p id="kan-status" role="status"></p></section>
+      <section class="panel"><h3>Saved case studies</h3><div class="form-row"><select id="kan-saved" aria-label="Saved KAN case study"></select><button id="kan-load" class="button secondary">Open results</button></div></section>
+      <section id="kan-results" class="panel" hidden><h3>How much local data is enough?</h3><p>Compare the selected PINNMamba, MLP and LSTM training scopes against kan_pure, kan_tuned and kan_complex. Rows identify the model, target, seed, budget and scenario. Target budget lists are paired by position across catchments; shorter lists retain their final budget. Each target/mixed model is shared across all selected targets at that scenario’s budgets.</p>
+      <div id="kan-run-basins" class="notice" aria-label="Saved run basins"></div>
+      <div class="form-row"><label class="field">Catchment<select id="kan-plot-basin"></select></label><label class="field">Seed<select id="kan-plot-seed"></select></label><label class="field grow">Budget scenario<select id="kan-plot-scenario"></select></label></div>
+      <div id="kan-learning-curve" class="chart"></div><div id="kan-metrics" class="data-output"></div><h3>Executed symbolic relationship</h3><p class="subtle">Q = overflow + retained water × sigmoid(F(storage/C, liquid/C, PET/C) + local offset). Storage and snow are simulated states, rather than measured quantities.</p><pre id="kan-equations" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre><button id="kan-download" class="button secondary">↓ Equations, coefficients, scores & daily fluxes</button></section>
+      <section class="panel"><details><summary>Protocol, coverage and selection audit</summary><pre id="kan-audit" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section>
+    </section>
     <section id="hydropower" class="view" hidden>
-      <div class="page-intro"><div class="eyebrow">RESEARCH / HYDROPOWER MONITORING</div><h1>See the flow at each plant<span class="accent-dot">.</span></h1><p>Explore Swiss hydropower plants and discharge predictions from completed experiments.</p></div>
+      <div class="page-intro"><div class="eyebrow">RESEARCH / HYDROPOWER</div><h1>Compare forecasts. Price the error<span class="accent-dot">.</span></h1><p>Compare two saved runs against shared discharge observations and explore daily energy-cost scenarios.</p></div>
       <section class="panel">
         <div class="form-row">
-          <label class="field">Catchment dataset<select id="hydropower-dataset" aria-label="Hydropower catchment dataset"></select></label>
+          <label class="field grow">Catchment dataset<select id="hydropower-dataset" aria-label="Hydropower catchment dataset"></select></label>
+          <button id="hydropower-refresh" class="button secondary">Refresh runs</button>
+        </div>
+      </section>
+      <section class="panel hydro-comparison-panel" aria-labelledby="hydro-compare-heading">
+        <h2 id="hydro-compare-heading">Run A versus Run B</h2>
+        <div class="form-row">
+          <label class="field grow">Run A<select id="hydro-compare-a"></select></label>
+          <label class="field grow">Run B · spending baseline<select id="hydro-compare-b"></select></label>
+        </div>
+        <div class="form-row">
+          <label class="field">Period start<input id="hydro-compare-start" type="date"></label>
+          <label class="field">Period end<input id="hydro-compare-end" type="date"></label>
+          <label class="field">Forecast lead day<input id="hydro-compare-lead" type="number" min="1" max="366" step="1" value="1"></label>
+          <label class="field">Map date<select id="hydro-compare-date"><option value="">Latest paired date</option></select></label>
+        </div>
+        <p class="subtle">Blank period bounds use all shared dates. Only matching basins, forecast issues, lead times and observations are evaluated. Metrics and costs cover the paired period; maps show the selected day.</p>
+        <details open>
+          <summary>Abstract run-of-river plant · economic assumptions</summary>
+          <div class="form-row hydro-scenario">
+            <label class="field">Net head (m)<input id="hydro-compare-head_m" type="number" min="0.01" max="10000" step="any" value="100" required></label>
+            <label class="field">Combined efficiency (0–1)<input id="hydro-compare-efficiency" type="number" min="0.001" max="1" step="any" value="0.9" required></label>
+            <label class="field">Environmental flow (m³/s)<input id="hydro-compare-environmental_flow_m3_s" type="number" min="0" max="10000000" step="any" value="0" required></label>
+            <label class="field">Maximum turbine flow (m³/s)<input id="hydro-compare-max_turbine_flow_m3_s" type="number" min="0.001" max="10000000" step="any" placeholder="Unlimited"></label>
+            <label class="field">Shortfall penalty (€/MWh)<input id="hydro-compare-shortfall_eur_mwh" type="number" min="0" max="10000000" step="any" value="50" required><span class="field-hint">Predicted energy exceeds available energy.</span></label>
+            <label class="field">Surplus penalty (€/MWh)<input id="hydro-compare-surplus_eur_mwh" type="number" min="0" max="10000000" step="any" value="20" required><span class="field-hint">Available energy exceeds predicted energy.</span></label>
+          </div>
+          <p class="subtle">Defaults are illustrative assumptions, not market-average tariffs. Each daily mean is held constant across 96 quarter-hours. E = 0.23544 × efficiency × head × turbine flow (MWh/day). Turbine flow is river flow minus environmental flow, bounded by zero and the optional maximum.</p>
+        </details>
+        <div class="form-row">
+          <button id="hydro-compare-update" class="button primary" disabled>Compare runs ↗</button>
+          <button id="hydro-compare-download" class="button secondary" disabled>Download comparison JSON</button>
+        </div>
+        <p id="hydro-compare-status" class="subtle" role="status" aria-live="polite">Open this view to load available runs.</p>
+        <div class="hydro-comparison-maps">
+          <div><h3 id="hydro-compare-title-a">Run A · error against observations</h3><div id="hydro-compare-map-a" class="hydro-error-map" role="region" aria-label="Run A signed discharge error map"></div></div>
+          <div><h3 id="hydro-compare-title-b">Run B · error against observations</h3><div id="hydro-compare-map-b" class="hydro-error-map" role="region" aria-label="Run B signed discharge error map"></div></div>
+        </div>
+        <p id="hydro-compare-legend" class="subtle"></p>
+        <p id="hydro-compare-map-status" class="subtle" role="status"></p>
+        <h3>Accuracy on shared observations</h3><div id="hydro-compare-metrics" class="data-output"></div>
+        <p id="hydro-compare-accuracy"></p>
+        <p class="subtle">MAE, RMSE and bias use paired basin-days in m³/s. NSE is calculated separately per basin and then averaged; constant observed series have no defined NSE. NSE changes are score points, not percentages of cost.</p>
+        <h3>Simulated forecast-related costs</h3><p id="hydro-compare-summary" role="status" aria-live="polite"></p>
+        <aside class="hydro-savings-explainer" aria-labelledby="hydro-savings-heading">
+          <h4 id="hydro-savings-heading">How do we calculate the savings?</h4>
+          <ol>
+            <li><strong>Compare the same days.</strong> We pair A and B with the same observed river flow, catchment and forecast issue/lead. Both models are scored on exactly the same usable data.</li>
+            <li><strong>Turn flow into daily energy.</strong> Using the head, efficiency and flow limits entered above, we calculate energy from each prediction and from the observed flow. The latter is our estimate of available energy.</li>
+            <li><strong>Price the energy error.</strong> Predicting more energy than was available incurs the shortfall penalty; predicting less incurs the surplus penalty. We multiply each energy difference in MWh by its selected €/MWh penalty and add the costs across the paired period.</li>
+            <li><strong>Compare spending with B.</strong> Savings = cost B − cost A. Savings (%) = 100 × (cost B − cost A) ÷ cost B. A positive result means A costs less under this scenario; a negative result means A costs more.</li>
+          </ol>
+          <p><strong>Example:</strong> if B's simulated cost is €100 and A's is €80, A saves €20, or 20%. Its cost index is 80 when B = 100. This percentage concerns forecast-related penalties, not the plant's total operating budget. When B costs zero, the percentage and index are undefined.</p>
+          <details>
+            <summary>Assumptions behind the estimate</summary>
+            <ul>
+              <li><strong>A simplified run-of-river plant.</strong> We use basin gauge flow as a proxy for turbine inflow, with the same chosen head, efficiency, environmental flow and turbine-flow limit for A and B. These settings describe an abstract plant, not measured properties of each mapped plant.</li>
+              <li><strong>Constant flow within each day.</strong> Each daily mean stands for 96 identical quarter-hours. With constant head and efficiency, E = 0.23544 × efficiency × head (m) × turbine flow (m³/s), in MWh/day. Turbine flow is reduced by environmental flow and bounded by zero and the optional maximum. Daily averaging makes these flow limits approximate.</li>
+              <li><strong>Assumed prices.</strong> The editable penalties are illustrative, not historical market prices or industry-average fees. We do not simulate intraday variability, reservoir scheduling, outages or actual market settlement.</li>
+              <li><strong>One abstract plant per matched basin.</strong> Several map markers can share one basin's results; we count that basin once. Catchments can overlap, so totals describe the abstract comparison cohort, not an actual fleet's electricity production or spending.</li>
+              <li><strong>The selected period only.</strong> Costs cover all paired days in the selected range, not just the map date, and are not annualized. Available energy is calculated from observed flow, not measured generation. MAE and NSE describe accuracy separately; we do not convert an NSE increase directly into euros.</li>
+            </ul>
+          </details>
+        </aside>
+        <h3>Per-basin accuracy and costs</h3><div id="hydro-compare-basins" class="data-output hydro-comparison-table"></div>
+        <details><summary>Plant markers on the selected date</summary><div id="hydro-compare-plants" class="data-output hydro-comparison-table"></div></details>
+        <details><summary>Pairing and exclusion audit</summary><p class="subtle">Row counts record invalid data, unselected leads and inferred legacy one-day issues. Only-A/B counts precede period filtering. Observation conflicts and missing areas/geometries are counted within the requested period.</p><pre id="hydro-compare-audit"></pre></details>
+        <p class="subtle">Method references: <a href="https://www.nrel.gov/docs/fy21osti/74721.pdf" target="_blank" rel="noopener">NREL · water-power equation</a>; <a href="https://doi.org/10.1016/j.renene.2026.126147" target="_blank" rel="noopener">Wergeland et al. · forecast-related imbalance costs</a>; <a href="https://doi.org/10.1029/2019WR025280" target="_blank" rel="noopener">Anghileri et al. · Swiss forecast value</a>.</p>
+      </section>
+      <section class="panel">
+        <h2>Single-run flow monitoring</h2>
+        <div class="form-row">
           <label class="field grow">Model run<select id="hydropower-run"><option value="">Loading runs…</option></select></label>
           <label class="field">Prediction date<input id="hydropower-date" type="date"><span class="field-hint">Blank uses the latest prediction date.</span></label>
           <button id="hydropower-update" class="button primary" disabled>Update map ↗</button>
-          <button id="hydropower-refresh" class="button secondary">Refresh runs</button>
         </div>
         <p id="hydropower-status" class="subtle" role="status" aria-live="polite">Open this view to load plant locations and available runs.</p>
         <p id="hydropower-summary" class="subtle"></p>

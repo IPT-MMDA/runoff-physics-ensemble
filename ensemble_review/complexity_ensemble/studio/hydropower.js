@@ -1,4 +1,5 @@
-import { finite, format } from "./core.js";
+import { finite, format, runName, runOptionLabel } from "./core.js";
+import { HydropowerComparisonView } from "./hydropower-comparison.js";
 
 export function dischargeColor(value) {
   if (!finite(value)) return "#9ca3af";
@@ -46,14 +47,17 @@ export class HydropowerView {
     $("hydropower-run").addEventListener("change", () => this.clearForecast());
     $("hydropower-date").addEventListener("change", () => this.clearForecast(false));
     $("hydropower-update").addEventListener("click", () => this.update());
+    this.comparison = new HydropowerComparisonView(api, renderTable, leaflet);
   }
   reset() {
+    this.comparison.setRuns([]);
     ++this.version; this.loaded = false; this.loading = false; this.loadingVersion = null; this.stations = null; this.runs = [];
     $("hydropower-dataset").replaceChildren(); $("hydropower-run").replaceChildren();
     $("hydropower-table").replaceChildren(); $("hydropower-summary").textContent = "";
     $("hydropower-update").disabled = true; $("hydropower-refresh").disabled = false; this.layer?.clearLayers();
   }
   async activate(refresh = false) {
+    this.comparison.resize();
     this.map?.invalidateSize();
     if (this.loading || (this.loaded && !refresh)) return;
     const version = ++this.version; this.loading = true; this.loadingVersion = version;
@@ -61,8 +65,17 @@ export class HydropowerView {
     $("hydropower-status").textContent = "Loading hydropower plants and available runs…";
     try {
       const [stations, runs] = await Promise.all([this.api("/hydropower/sites"), this.api("/hydropower/runs")]);
+      // Servers started before display names were added return only IDs here.
+      // Their existing run-detail endpoint still supplies model/strategy data.
+      const namedRuns = await Promise.all(runs.items.map(async run => {
+        if (run.display_name || (run.config?.model?.complex_expert && run.config?.strategy?.approach)) return run;
+        try {
+          const metadata = await this.api(`/runs/${encodeURIComponent(run.run_id)}`);
+          return { ...run, display_name: metadata.display_name, config: metadata.config };
+        } catch { return run; }
+      }));
       if (version !== this.version) return;
-      this.stations = stations; this.runs = runs.items; this.loaded = true;
+      this.stations = stations; this.runs = namedRuns; this.loaded = true;
       const selected = $("hydropower-dataset").value;
       $("hydropower-dataset").replaceChildren(...[...new Set(this.runs.map(r => r.dataset_id))].map(id => option(id, id)));
       if ([...$("hydropower-dataset").options].some(o => o.value === selected)) $("hydropower-dataset").value = selected;
@@ -71,6 +84,7 @@ export class HydropowerView {
     } catch (error) {
       if (version !== this.version) return;
       this.loaded = false; this.stations = null; this.layer?.clearLayers();
+      this.comparison.setRuns([]);
       $("hydropower-table").replaceChildren(); $("hydropower-summary").textContent = "";
       $("hydropower-status").textContent = error.message;
     } finally {
@@ -80,7 +94,8 @@ export class HydropowerView {
   populateRuns() {
     const selected = $("hydropower-run").value;
     const runs = this.runs.filter(r => r.dataset_id === $("hydropower-dataset").value);
-    $("hydropower-run").replaceChildren(...runs.map(r => option(r.run_id, r.run_id)));
+    this.comparison.setRuns(runs);
+    $("hydropower-run").replaceChildren(...runs.map(r => option(r.run_id, runOptionLabel(r))));
     if (!runs.length) $("hydropower-run").append(option("", "No prediction runs available"));
     else if (runs.some(r => r.run_id === selected)) $("hydropower-run").value = selected;
   }
@@ -105,7 +120,8 @@ export class HydropowerView {
       $("hydropower-date").value = result.map.target_date;
       $("hydropower-date").min = result.available_dates[0]; $("hydropower-date").max = result.available_dates.at(-1);
       $("hydropower-status").textContent = `Showing ${result.map.target_date} · dataset ${result.dataset_id} · ${result.matched}/${result.total} matched plants · day-over-day change available for ${result.with_change}.`;
-      $("hydropower-summary").textContent = `Run ${result.run_id}. Prediction dates: ${result.available_dates[0]} to ${result.available_dates.at(-1)}. Changes compare the previous calendar day and use the mean prediction across ensemble seeds.`;
+      const selectedRun = this.runs.find(run => run.run_id === result.run_id) || { run_id: result.run_id };
+      $("hydropower-summary").textContent = `Run ${runName(selectedRun)}. Prediction dates: ${result.available_dates[0]} to ${result.available_dates.at(-1)}. Changes compare the previous calendar day and use the mean prediction across ensemble seeds.`;
       this.render(result.map);
     } catch (error) {
       if (version !== this.version) return;

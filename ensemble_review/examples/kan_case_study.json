@@ -1,0 +1,19 @@
+{
+  "source_basins": ["4009"],
+  "validation_basins": ["4008"],
+  "target_basins": ["2488"],
+  "train_start": "2010-01-01",
+  "train_end": "2010-06-30",
+  "validation_start": "2010-07-01",
+  "validation_end": "2010-07-31",
+  "test_start": "2010-08-01",
+  "test_end": "2010-08-31",
+  "observation_budgets": [30, 90, 180],
+  "seeds": [0],
+  "warmup_days": 90,
+  "minimum_source_days": 180,
+  "teacher_epochs": 20,
+  "adaptation_epochs": 30,
+  "kan_steps": 50,
+  "kan_candidates": 3
+}

@@ -84,6 +84,11 @@ class JobStore:
         with self.connect() as db:
             return self.decode(db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone())
 
+    def list_kind(self, kind, limit=100):
+        with self.connect() as db:
+            return [self.decode(row) for row in db.execute(
+                "SELECT * FROM jobs WHERE kind=? ORDER BY created_at DESC LIMIT ?", (kind, limit))]
+
     def cancel(self, job_id):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")

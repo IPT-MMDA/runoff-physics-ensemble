@@ -21,7 +21,7 @@ function fixture(api) {
   return { view, node: id => document.getElementById(`hydropower-${id}`) };
 }
 const stations = { features: [], target_date: null };
-const runs = { items: [{ dataset_id: 'ch', run_id: 'one' }, { dataset_id: 'other', run_id: 'two' }], skipped: 0 };
+const runs = { items: [{ dataset_id: 'ch', run_id: 'one', display_name: 'one' }, { dataset_id: 'other', run_id: 'two', display_name: 'two' }], skipped: 0 };
 const initial = path => Promise.resolve(path.endsWith('/sites') ? stations : runs);
 const forecast = { map: { features: [], target_date: '2024-01-02' }, available_dates: ['2024-01-01', '2024-01-02'], dataset_id: 'ch', run_id: 'one', total: 2, matched: 1, with_change: 1 };
 
@@ -58,6 +58,31 @@ test('dataset changes select matching runs and clear previous forecast dates', a
   assert.equal(node('run').value, 'two');
   assert.equal(node('date').value, '');
   assert.equal(view.rendered, stations);
+});
+
+test('readable model names are used without changing selected run identifiers', async () => {
+  const named = { items: [{ dataset_id: 'ch', run_id: 'one', display_name: 'mlp_no_routing' }], skipped: 0 };
+  const { view, node } = fixture(path => Promise.resolve(path.endsWith('/sites') ? stations : named));
+  await view.activate();
+  assert.equal(node('run').value, 'one');
+  assert.match(node('run').options[0].textContent, /mlp_no_routing/);
+  const compare = document.getElementById('hydro-compare-a');
+  assert.equal(compare.value, 'one');
+  assert.match(compare.options[0].textContent, /mlp_no_routing/);
+});
+
+test('an older running API gets readable Hydropower labels from saved run metadata', async () => {
+  const legacy = { items: [{ dataset_id: 'ch', run_id: 'one' }, { dataset_id: 'ch', run_id: 'two' }], skipped: 0 };
+  const { view, node } = fixture(path => {
+    if (path === '/hydropower/sites') return Promise.resolve(stations);
+    if (path === '/hydropower/runs') return Promise.resolve(legacy);
+    return Promise.resolve({ config: { model: { complex_expert: path.endsWith('one') ? 'mlp' : 'lstm' }, strategy: { approach: 'no_routing' } } });
+  });
+  await view.activate();
+  assert.equal(node('run').value, 'one');
+  assert.match(node('run').options[0].textContent, /mlp_no_routing/);
+  assert.match(document.getElementById('hydro-compare-b').options[1].textContent, /lstm_no_routing/);
+  assert.equal(view.comparison.runNames.get('one'), 'mlp_no_routing');
 });
 
 test('completed forecast shows counts and a selected date', async () => {

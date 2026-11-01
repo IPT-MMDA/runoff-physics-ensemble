@@ -44,10 +44,6 @@ from .hydrology_drought import (
 from .hydrology_hard_routing_consolidation_comparison import hard_routed_losses
 from .ood import MahalanobisOODDetector
 from .stacking import fit_convex_stacking_weight
-from .kan_physics import (
-    KANPhysicsSettings, PHYSICS_OPTIMIZATION_MODES, discover_kan_physics_correction,
-    standalone_kan_prediction,
-)
 
 
 TRAINING_SCOPES = ("exclude_targets", "all_basins", "targets_only")
@@ -151,18 +147,8 @@ class HyperparameterConfig:
 @dataclass(frozen=True)
 class PhysicsModelConfig:
     name: str = "linear_reservoir"
+    # Retained solely to reject enabled legacy configurations with migration guidance.
     optimization_mode: str = "none"
-    distillation_teacher: str = "hard_routing"
-    kan_candidates: int = 3
-    kan_steps: int = 50
-    kan_grid: int = 3
-    kan_spline_order: int = 3
-    kan_additive_nodes: int = 2
-    kan_multiplicative_nodes: int = 1
-    kan_sparsity_weight: float = 1e-3
-    robustness_noise_levels: tuple[float, ...] = (0.05, 0.1, 0.2)
-    robustness_accuracy_tolerance: float = 0.05
-    symbolic: bool = True
 
 
 @dataclass(frozen=True)
@@ -284,35 +270,8 @@ class RegionalExperimentConfig:
             raise ValueError("OOD quantile or covariance shrinkage is invalid")
         if self.physics.name not in PHYSICS_MODELS:
             raise ValueError(f"physics model must be one of {PHYSICS_MODELS}")
-        if self.physics.optimization_mode not in ("none", *PHYSICS_OPTIMIZATION_MODES):
-            raise ValueError(
-                "physics optimization mode must be none, accuracy, robustness, balanced, "
-                "or distillation"
-            )
-        if (
-            self.physics.optimization_mode != "none"
-            and _SCOPE_ALIASES[self.basins.training_scope] == "exclude_targets"
-        ):
-            raise ValueError(
-                "KAN physics optimization requires target basins in training; choose "
-                "all_basins or targets_only"
-            )
-        if self.physics.distillation_teacher not in set(TRAINING_APPROACHES) - {"persistence", "seasonal_climatology"}:
-            raise ValueError(f"distillation teacher must be one of {TRAINING_APPROACHES}")
-        if min(
-            self.physics.kan_candidates, self.physics.kan_steps, self.physics.kan_grid,
-            self.physics.kan_spline_order, self.physics.kan_additive_nodes,
-        ) < 1 or self.physics.kan_multiplicative_nodes < 0:
-            raise ValueError("KAN sizes, candidate count, and step count are invalid")
-        if self.physics.kan_sparsity_weight < 0 or not 0 <= self.physics.robustness_accuracy_tolerance <= 1:
-            raise ValueError("KAN sparsity and robustness tolerance are invalid")
-        if any(level <= 0 for level in self.physics.robustness_noise_levels):
-            raise ValueError("KAN robustness noise levels must be positive")
-        if (
-            self.physics.optimization_mode in {"robustness", "balanced"}
-            and not self.physics.robustness_noise_levels
-        ):
-            raise ValueError("robustness and balanced KAN modes require noise levels")
+        if self.physics.optimization_mode != "none":
+            raise ValueError("Regional KAN corrections have been removed. Use the separate KAN case study pipeline.")
         if self.extremes.mode not in {"none", "statistical", "event_based", "drought"}:
             raise ValueError("extreme mode must be none, statistical, event_based, or drought")
         if self.forecast.mode not in {"one_day", "rolling"} or self.forecast.horizon_days < 2:
@@ -405,8 +364,10 @@ def _normalize_basin_id(value: object) -> str:
 class CAMELSCHCatalog:
     """Catalog joining local CAMELS-CH series, metadata, attributes, and polygons."""
 
-    def __init__(self, root: str | Path, records: Sequence[BasinCatalogRecord] | None = None):
+    def __init__(self, root: str | Path, records: Sequence[BasinCatalogRecord] | None = None,
+                 *, simplify_geometry: bool = True):
         self.root = Path(root)
+        self.simplify_geometry = simplify_geometry
         self.records = tuple(records) if records is not None else self._discover()
         self._by_id = {record.basin_id: record for record in self.records}
 
@@ -485,9 +446,10 @@ class CAMELSCHCatalog:
                 # vertices made each Gradio map payload well over 100 MB.
                 # This only affects catalog display geometry; model inputs and
                 # all hydrological calculations remain unchanged.
-                frame.geometry = frame.geometry.simplify(
-                    tolerance=0.002, preserve_topology=True
-                )
+                if self.simplify_geometry:
+                    frame.geometry = frame.geometry.simplify(
+                        tolerance=0.002, preserve_topology=True
+                    )
                 id_column = next((column for column in frame.columns if column.lower() in {
                     "gauge_id", "station_id", "basin_id", "id", "gauge_code"
                 }), None)
@@ -527,6 +489,13 @@ class CAMELSCHCatalog:
         return load_camels_ch(
             self.root, basin_id, start=start.isoformat(), end=end.isoformat(),
             include_landcover=False,
+        )
+
+    def load_case_study_series(self, basin_id: str, start: date, end: date) -> HydrologySeries:
+        """Preserve weather dates with missing discharge for low-data calibration."""
+        return load_camels_ch(
+            self.root, basin_id, start=start.isoformat(), end=end.isoformat(),
+            include_landcover=False, allow_missing_discharge=True,
         )
 
 
@@ -1009,57 +978,6 @@ def _event_thresholds(config: ExtremeEventConfig, targets: tuple[str, ...],
     return thresholds
 
 
-def _teacher_prediction(
-    model: RoutedHydrologyModel,
-    split: RegionalSplit,
-    approach: str,
-    device: torch.device,
-    *,
-    train_split: RegionalSplit,
-    validation_split: RegionalSplit,
-    ood_quantile: float,
-    ood_shrinkage: float,
-) -> torch.Tensor:
-    """Return a frozen approach's final normalized discharge prediction."""
-    inputs = split.inputs.to(device)
-    static = split.static_inputs.to(device)
-    with torch.no_grad():
-        if approach not in {"no_routing", "static_50_50", "ood_fallback", "stacking"}:
-            output = model(
-                inputs, static_inputs=static, return_details=True,
-                hard=approach == "hard_routing",
-                routing_features=None if split.routing_features is None else split.routing_features.to(device),
-            )
-            assert isinstance(output, HydrologyRoutedOutput)
-            return output.discharge.squeeze(-1)
-        complex_prediction = model._positive_discharge(model.complex_expert(inputs, static))
-        if approach == "no_routing":
-            return complex_prediction.squeeze(-1)
-        simple_prediction = model._positive_discharge(model.simple_expert(inputs, static))
-        if approach == "static_50_50":
-            weight = torch.full((len(inputs),), 0.5, device=device)
-        elif approach == "stacking":
-            validation_inputs = validation_split.inputs.to(device)
-            validation_static = validation_split.static_inputs.to(device)
-            validation_simple = model._positive_discharge(
-                model.simple_expert(validation_inputs, validation_static)
-            )
-            validation_complex = model._positive_discharge(
-                model.complex_expert(validation_inputs, validation_static)
-            )
-            fitted_weight, _ = fit_convex_stacking_weight(
-                validation_simple, validation_complex,
-                validation_split.targets.to(device),
-            )
-            weight = torch.full((len(inputs),), fitted_weight, device=device)
-        else:
-            detector = MahalanobisOODDetector(ood_quantile, ood_shrinkage).fit(
-                train_split.inputs.to(device), train_split.static_inputs.to(device)
-            )
-            weight = (~detector.is_ood(inputs, static)).to(inputs.dtype)
-        return torch.lerp(simple_prediction, complex_prediction, weight[:, None]).squeeze(-1)
-
-
 def _predict_with_approach(
     model: RoutedHydrologyModel, inputs: torch.Tensor, static: torch.Tensor,
     approach: str, *, stacking_weight: float | None = None,
@@ -1251,7 +1169,6 @@ def prepare_regional_data(config, *, catalog=None, series_by_basin=None, audit_o
     relevant = tuple(dict.fromkeys((*training, *config.basins.target_basins)))
     hp = config.hyperparameters
     routed = config.strategy.approach in {"soft_routing", "hard_routing", "distillation"}
-    routed = routed or (config.physics.optimization_mode == "distillation" and config.physics.distillation_teacher in {"soft_routing", "hard_routing", "distillation"})
     context_length = hp.routing_context_length if routed and hp.complexity_method in SCORE_ROUTING_METHODS else hp.sequence_length
     full_start = config.dates.train.resolved().start - timedelta(days=context_length)  # type: ignore[operator]
     full_end = config.dates.test.resolved().end
@@ -1266,7 +1183,10 @@ def prepare_regional_data(config, *, catalog=None, series_by_basin=None, audit_o
     if config.benchmark.mode != "none":
         from .benchmarks import prepare_bafu
         series, provenance = prepare_bafu(config, catalog, relevant, full_start, full_end)
-    load_failures: dict[str, str] = {}
+    load_failures: dict[str, str] = {
+        **provenance.get("observation_load_failures", {}),
+        **provenance.get("predictor_load_failures", {}),
+    }
     for basin in relevant:
         if basin not in series and config.benchmark.mode == "none":
             try:
@@ -1303,6 +1223,7 @@ def prepare_regional_data(config, *, catalog=None, series_by_basin=None, audit_o
     data = builder(series, attrs, scope, config.dates,
                                         sequence_length=hp.sequence_length,
                                         routing_context_length=context_length)
+    data.skipped_basins.update(load_failures)
     if config.benchmark.mode != "none" and config.benchmark.strict_cohort and data.skipped_basins:
         raise ValueError("Strict benchmark cohort has incomplete windows: " + str(dict(data.skipped_basins)))
     provenance["load_failures"] = load_failures
@@ -1352,9 +1273,7 @@ def run_regional_experiment(
     relevant = tuple(dict.fromkeys((*training, *config.basins.target_basins)))
     hp = config.hyperparameters
     routed_approaches = {"soft_routing", "hard_routing", "distillation"}
-    uses_complexity = (config.strategy.approach in routed_approaches
-                       or (config.physics.optimization_mode == "distillation"
-                           and config.physics.distillation_teacher in routed_approaches))
+    uses_complexity = config.strategy.approach in routed_approaches
     estimator = None
     if uses_complexity and hp.complexity_method in SCORE_ROUTING_METHODS:
         estimator_kwargs = dict(embedding_dim=hp.embedding_dim, delay=hp.embedding_delay,
@@ -1414,9 +1333,6 @@ def run_regional_experiment(
     ood_thresholds: list[float] = []
     stacking_weights: list[float] = []
     stacking_validation_mses: list[float] = []
-    physics_formulas: list[str] = []
-    physics_candidate_metrics: list[list[dict[str, float]]] = []
-    physics_candidate_indices: list[int] = []
     failures: list[str] = []
     resolved["hyperparameters"]["device"] = str(device)
     parameter_count = 0
@@ -1446,114 +1362,6 @@ def run_regional_experiment(
             model = build_model()
             if config.benchmark.mode != "none" and config.benchmark.target == "daily_max":
                 model.physics_available = False
-            if config.physics.optimization_mode != "none":
-                teacher_approach = (
-                    config.physics.distillation_teacher
-                    if config.physics.optimization_mode == "distillation"
-                    else config.strategy.approach
-                )
-                teacher_config = replace(
-                    config,
-                    strategy=replace(config.strategy, approach=teacher_approach),
-                    physics=replace(config.physics, optimization_mode="none"),
-                )
-                teacher_traces: dict[str, list[float]] = {}
-                _train(
-                    model, data.train, teacher_config, seed, device, progress_callback,
-                    cancellation_token, teacher_traces, seed_index,
-                    len(config.hyperparameters.seeds), data.feature_names,
-                )
-                if _cancelled(cancellation_token):
-                    break
-                model.eval()
-                response_tensor, recession_tensor = model.reservoir_parameters()
-                response = float(response_tensor.detach().cpu())
-                recession = float(recession_tensor.detach().cpu())
-                train_teacher = validation_teacher = None
-                if config.physics.optimization_mode == "distillation":
-                    train_teacher = _teacher_prediction(
-                        model, data.train, teacher_approach, device,
-                        train_split=data.train, validation_split=data.validation,
-                        ood_quantile=config.hyperparameters.ood_quantile,
-                        ood_shrinkage=config.hyperparameters.ood_shrinkage,
-                    ) * data.discharge_scale.to(device)
-                    validation_teacher = _teacher_prediction(
-                        model, data.validation, teacher_approach, device,
-                        train_split=data.train, validation_split=data.validation,
-                        ood_quantile=config.hyperparameters.ood_quantile,
-                        ood_shrinkage=config.hyperparameters.ood_shrinkage,
-                    ) * data.discharge_scale.to(device)
-                settings = KANPhysicsSettings(
-                    mode=config.physics.optimization_mode,
-                    candidates=config.physics.kan_candidates,
-                    steps=config.physics.kan_steps,
-                    grid=config.physics.kan_grid,
-                    spline_order=config.physics.kan_spline_order,
-                    additive_nodes=config.physics.kan_additive_nodes,
-                    multiplicative_nodes=config.physics.kan_multiplicative_nodes,
-                    sparsity_weight=config.physics.kan_sparsity_weight,
-                    noise_levels=config.physics.robustness_noise_levels,
-                    robustness_accuracy_tolerance=(
-                        config.physics.robustness_accuracy_tolerance
-                    ),
-                    symbolic=config.physics.symbolic,
-                )
-                discovery = discover_kan_physics_correction(
-                    train_physical=data.train.physical_inputs,
-                    validation_physical=data.validation.physical_inputs,
-                    train_observed_flow=(
-                        data.train.targets * data.discharge_scale
-                    ),
-                    validation_observed_flow=(
-                        data.validation.targets * data.discharge_scale
-                    ),
-                    feature_names=data.feature_names,
-                    response=response,
-                    recession=recession,
-                    settings=settings,
-                    seed=seed,
-                    device=device,
-                    train_teacher_flow=train_teacher,
-                    validation_teacher_flow=validation_teacher,
-                    train_basin_ids=data.train.basin_ids,
-                    validation_basin_ids=data.validation.basin_ids,
-                )
-                physics_formulas.append(
-                    f"delta_q = {response:.8g}*max(precipitation-pet, 0) "
-                    f"- {recession:.8g}*previous_discharge + ({discovery.formula})"
-                )
-                physics_candidate_metrics.append(discovery.candidate_metrics)
-                physics_candidate_indices.append(discovery.candidate_index)
-                for phase, values in teacher_traces.items():
-                    traces.setdefault(f"physics_teacher_{phase}", []).extend(values)
-                # Report the frozen equation's direct observation error before a
-                # fresh predictive model is trained with it. These are one-step
-                # predictions because each split supplies observed previous flow.
-                with torch.no_grad():
-                    for split_name, split in (
-                        ("train", data.train),
-                        ("validation", data.validation),
-                        ("test", data.test),
-                    ):
-                        standalone = standalone_kan_prediction(
-                            split.physical_inputs.to(device), data.feature_names,
-                            response, recession, discovery.correction,
-                        )
-                        observed = split.targets.to(device) * data.discharge_scale.to(device)
-                        normalized_mse = (
-                            (standalone - observed) / data.discharge_scale.to(device)
-                        ).square().mean()
-                        traces.setdefault(
-                            f"kan_standalone_{split_name}_observation_mse", []
-                        ).append(float(normalized_mse.cpu()))
-                teacher_raw_response = model.raw_response.detach().clone()
-                teacher_raw_recession = model.raw_recession.detach().clone()
-                model = build_model()
-                model.raw_response.data.copy_(teacher_raw_response)
-                model.raw_recession.data.copy_(teacher_raw_recession)
-                model.raw_response.requires_grad_(False)
-                model.raw_recession.requires_grad_(False)
-                model.set_physics_correction(discovery.correction)
             if config.strategy.approach == "no_routing":
                 parameter_count = sum(
                     item.numel() for item in (
@@ -1655,18 +1463,6 @@ def run_regional_experiment(
                     sum(stacking_validation_mses) / len(stacking_validation_mses)
                 ),
                 "stacking_calibration_scope": "pooled_target_validation",
-            })
-        if physics_formulas:
-            routing.update({
-                "physics_optimization_mode": config.physics.optimization_mode,
-                "physics_distillation_teacher": (
-                    config.physics.distillation_teacher
-                    if config.physics.optimization_mode == "distillation" else "none"
-                ),
-                "kan_selected_formulas": physics_formulas,
-                "kan_selected_candidate_indices": physics_candidate_indices,
-                "kan_candidate_metrics": physics_candidate_metrics,
-                "kan_selection_scope": "target_validation",
             })
     else: aggregate, routing = {}, {}
     routing["complexity_method"] = hp.complexity_method

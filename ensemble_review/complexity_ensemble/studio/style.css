@@ -31,4 +31,39 @@
 #hydropower-status,#hydropower-summary{margin:12px 0}
 #hydropower-table{max-height:480px;overflow:auto;margin:16px 0}
 .hydropower-legend{margin:12px 0;flex-wrap:wrap}
+.catchment-preset{margin:14px 0 18px;padding:14px;border:1px solid var(--line);background:var(--accent-soft);border-radius:4px}
+.catchment-preset .button{width:100%;margin-bottom:8px}
+.hydro-comparison-maps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.hydro-comparison-panel>h2{margin-bottom:24px}
+.hydro-comparison-panel>h3{margin:24px 0 14px}
+.hydro-comparison-panel>p{margin:14px 0}
+.hydro-comparison-panel>details{margin:20px 0}
+.hydro-comparison-panel>details>summary{cursor:pointer;font-weight:500}
+.hydro-comparison-maps h3{overflow-wrap:anywhere;font-size:14px}
+.hydro-error-map{height:420px;border:1px solid var(--line);border-radius:8px;background:#edf3f7;isolation:isolate}
+.hydro-comparison-table{max-height:380px;overflow:auto}
+.hydro-scenario{margin:18px 0}
+#hydro-compare-legend{padding:12px;border-left:6px solid #2166ac;border-right:6px solid #b2182b;background:linear-gradient(90deg,#e2ecf7,#f7f7f7,#f4dce0)}
+#hydro-compare-legend:empty{display:none}
+#hydro-compare-summary{font-size:17px;line-height:1.6}
+.hydro-savings-explainer{margin:18px 0;padding:20px;border:1px solid var(--line);border-left:3px solid var(--accent-text);border-radius:4px;background:var(--accent-soft);font-size:13px;line-height:1.7}
+.hydro-savings-explainer h4{margin-bottom:12px}
+.hydro-savings-explainer ol,.hydro-savings-explainer ul{padding-left:22px;margin:12px 0}
+.hydro-savings-explainer li+li{margin-top:10px}
+.hydro-savings-explainer p{margin:14px 0;color:var(--ink)}
+.hydro-savings-explainer summary{cursor:pointer;font-weight:500}
+#hydro-compare-audit{white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:900px){.hydro-comparison-maps{grid-template-columns:1fr}.hydro-error-map{height:360px}}
 @media(max-width:760px){#hydropower-map{height:400px}}
+
+#kan-cohorts{grid-template-columns:repeat(3,minmax(0,1fr))}
+#kan-run-basins{overflow-wrap:anywhere}
+.kan-cohort-group{min-width:0;margin:0;padding:12px;border:1px solid var(--line);border-radius:3px}
+.kan-cohort-group legend{font-size:12px;font-weight:500;padding:0 4px}
+.kan-cohort-group>input{font-size:11px;margin-bottom:10px}
+.kan-cohort-list{max-height:300px;overflow:auto;scrollbar-width:thin}
+.kan-cohort-choice{display:flex;align-items:flex-start;gap:8px;padding:8px 4px;cursor:pointer;font-size:11px;font-weight:400;line-height:1.5}
+.kan-cohort-choice span{overflow-wrap:anywhere}
+.kan-cohort-choice input{margin:1px 0 0;padding:0}
+.kan-cohort-choice:has(input:checked){background:var(--accent-soft)}
+@media(max-width:1000px){#kan-cohorts{grid-template-columns:1fr}}

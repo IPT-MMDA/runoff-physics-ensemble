@@ -25,6 +25,10 @@ it does not yet discover arbitrary BAFU stations outside CAMELS-CH.
 
 In the custom workspace, open **BAFU benchmark**, select a mode, choose target
 stations, training scope and dates, and click **Check benchmark coverage**.
+This manual audit is optional: **Run experiment** automatically checks coverage,
+excludes unusable basins and queues the remaining cohort. The job panel shows
+the retained counts and skipped station IDs/reasons. Conflicting observations
+exclude the entire station rather than choosing between inconsistent records.
 Choose **Event task → Drought events** or **High-flow events**. Existing setups
 retain high-flow evaluation unless drought is explicitly selected. Selecting
 BAFU-only disables physics and clears external-feature selections. API clients
@@ -42,7 +46,8 @@ windows without materializing the training sequence tensors or fitting models.
 For drought it also checks seven-day observation windows, training calendar
 references and the selected issue/horizon policy using the production verifier.
 The audit reports eligible and excluded drought days by station. Stations with
-no evaluable drought days fail before queueing. **Use stations with complete
+no evaluable drought days are excluded by automatic Run checks; an empty usable
+training or target set still fails before queueing. **Use stations with complete
 coverage** applies the audit's usable targets and training pool without disabling
 strict cohort checks.
 **Pin this evaluation for future runs** stores its SHA-256 fingerprint. Export
@@ -203,7 +208,13 @@ No calibrated probabilistic scores are claimed for deterministic model outputs.
   `training_started: false`, cohort status and manifest. No job is queued.
 - `POST /api/v1/experiments/validate`: existing configuration/layout validation;
   it does not replace date-coverage preflight.
-- `POST /api/v1/experiments`: existing explicit job submission; unchanged worker path.
+- `POST /api/v1/experiments`: set `skip_unusable_basins: true` for automatic
+  BAFU cohort filtering (Studio Run supplies this flag). The queued job response
+  includes `basin_selection` with requested/effective targets, training basins
+  and exclusions. The worker receives a strict, pruned cohort; saved results
+  retain `basin_selection_audit` and `skipped_basins`. Clients omitting the flag
+  retain explicit strict-cohort validation. A pinned evaluation fingerprint
+  must still match the resulting cohort.
 - `GET /api/v1/runs/{id}/benchmark`: resolved benchmark manifest.
 - `GET /api/v1/runs/{id}/artifacts/benchmark_manifest` and `/flood_metrics`: downloads.
 - `POST /api/v1/comparisons`: contract compatibility and optional paired RMSE analysis.

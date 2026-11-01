@@ -7,7 +7,6 @@ from complexity_ensemble.devices import as_double, randn, randperm, resolve_devi
 from complexity_ensemble.hydrology_comparison import _add_observation_noise, _metrics
 from complexity_ensemble.hydrology_extreme_comparison import _average_precision
 from complexity_ensemble.hydrology_morse_learning import _spearman
-from complexity_ensemble.kan_physics import KANPhysicsCorrection
 from complexity_ensemble.ood import MahalanobisOODDetector
 from complexity_ensemble.stacking import fit_convex_stacking_weight
 
@@ -84,15 +83,3 @@ def test_observation_noise_stays_on_device_and_only_changes_dynamic_features(dev
     assert noisy.device.type == device.type
     assert torch.count_nonzero(noisy[..., 0]) > 0
     assert torch.count_nonzero(noisy[..., 1]) == 0
-
-
-def test_cpu_kan_correction_returns_to_callers_device_with_gradients(device):
-    correction = KANPhysicsCorrection(
-        torch.nn.Linear(2, 1), torch.tensor([0, 1]),
-        torch.zeros(2), torch.ones(2), torch.tensor(0.), torch.tensor(1.),
-    )
-    inputs = torch.ones((3, 2, 2), device=device, requires_grad=True)
-    prediction = correction(inputs)
-    assert prediction.device.type == device.type
-    prediction.sum().backward()
-    assert inputs.grad is not None and torch.isfinite(inputs.grad).all()

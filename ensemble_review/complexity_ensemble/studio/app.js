@@ -1,6 +1,8 @@
-import { allPages, hanzeMetricDefinitions, hanzePerformance, floodMetricDefinitions, floodPerformance, floodScoreText, floodScoreColor, basinAvailability, basinCompatibilityLoaded, coerce, configureBafuTask, finite, format, meanByDate, pretty, terminal, useBenchmarkCoverage } from "./core.js";
+import { allPages, hanzeMetricDefinitions, hanzePerformance, floodMetricDefinitions, floodPerformance, floodScoreText, floodScoreColor, basinAvailability, basinCompatibilityLoaded, coerce, configureBafuTask, automaticBafuRequest, finite, format, meanByDate, pretty, runName, runOptionLabel, terminal, useBenchmarkCoverage } from "./core.js";
 import { BasinAtlas, chart } from "./charts.js?v=fixed-sky-blue-1";
 import { HydropowerView } from "./hydropower.js";
+import { KanCaseStudyView } from "./kan-case-study.js";
+import { selectHydropowerCohort } from "./catchment-presets.js";
 
 const $ = selector => document.querySelector(selector);
 const state = { token: sessionStorage.getItem("runoff.token") || "", datasets: [], basins: [], selected: new Set(), datasetCache: new Map(), predictions: new Map(), runs: [], totalRuns: 0, connected: false, bindings: [], run: null, job: null, pollTimer: null, replay: null, playTimer: null, datasetVersion: 0, resultVersion: 0, pageVersion: 0 };
@@ -43,7 +45,10 @@ function setConnection(connected, label) {
   $("#connection").classList.toggle("ready", connected); $("#connection").classList.toggle("error", !connected);
   updateLaunch();
 }
-function updateLaunch() { $("#launch").disabled = !state.connected || !state.selected.size || !state.config || state.submitting || state.basinsDataset !== $("#dataset").value || !basinCompatibilityLoaded(state.basins, state.config?.benchmark.mode) || Boolean(state.job && !terminal(state.job.status)); }
+function updateLaunch() {
+  $("#launch").disabled = !state.connected || !state.selected.size || !state.config || state.submitting || state.basinsDataset !== $("#dataset").value || !basinCompatibilityLoaded(state.basins, state.config?.benchmark.mode) || Boolean(state.job && !terminal(state.job.status));
+  $("#select-hydropower-50").disabled = !state.connected || !state.config || state.presetLoading || state.basinsDataset !== $("#dataset").value;
+}
 function option(value, label = value) { return el("option", { value, text: label }); }
 function setOptions(node, values, previous = node.value) { node.replaceChildren(...values.map(v => option(v.value ?? v, v.label ?? v))); if ([...node.options].some(o => o.value === previous)) node.value = previous; }
 function resolve(schema) { return schema?.$ref ? state.bootstrap.schema.$defs[schema.$ref.split("/").at(-1)] : schema; }
@@ -51,13 +56,13 @@ function schemaFor(section) { return resolve(resolve(state.bootstrap.schema.prop
 const choices = {
   complex_expert: ["pinnmamba", "mlp", "lstm"], simple_expert: ["rbf", "fourier"],
   approach: ["soft_routing", "hard_routing", "distillation", "no_routing", "static_50_50", "ood_fallback", "stacking", "persistence", "seasonal_climatology"],
-  device: ["cpu", "cuda", "mps", "auto"], mode: [], optimization_mode: ["none", "accuracy", "robustness", "balanced", "distillation"],
-  distillation_teacher: ["soft_routing", "hard_routing", "distillation", "no_routing", "static_50_50", "ood_fallback", "stacking"], definition: ["automatic_q95", "absolute", "quantile"],
+  device: ["cpu", "cuda", "mps", "auto"], mode: [],
+  definition: ["automatic_q95", "absolute", "quantile"],
   drought_definition: ["seasonal_quantile", "q347"], drought_smoothing: ["trailing", "centered"], name: ["linear_reservoir"],
 };
 const hints = {
   expected_evaluation_fingerprint: "Optional: pin the cohort and evaluation task after preflight. A changed target, date coverage, threshold or forecast policy then stops execution before training.",
-  strict_cohort: "Require every requested training and target station to have usable windows. Preflight reports exclusions without submitting a job.",
+  strict_cohort: "Require the checked cohort to remain usable. Run automatically excludes unusable BAFU stations first, then fixes the remaining cohort for training. Manual checks report all exclusions.",
   drought_definition: "Drought task only. Training-fitted seasonal percentile of seven-day mean flow, or a fixed Q347 estimate from raw daily flow.",
   drought_smoothing: "Trailing uses current and six earlier days. Centred requires rolling mode and horizon >= 4; final three leads cannot be scored.",
   drought_quantile: "Seasonal definition only; estimated from training data, never test observations.",
@@ -155,12 +160,13 @@ function renderConfig() {
     hyperparameters: ["sequence_length", "batch_size", "learning_rate", "device"],
   };
   let n = 4;
-  for (const [group, title] of [["hyperparameters", "Routing & hyperparameters"], ["model", "Model architecture"], ["strategy", "Training phases"], ["physics", "Physics & KAN"], ["extremes", "Extreme events"], ["forecast", "Forecasting"]]) {
+  for (const [group, title] of [["hyperparameters", "Routing & hyperparameters"], ["model", "Model architecture"], ["strategy", "Training phases"], ["physics", "Physics"], ["extremes", "Extreme events"], ["forecast", "Forecasting"]]) {
     const grid = section(title, String(n++).padStart(2, "0"));
     if (group === "extremes") grid.append(el("p", { class: "field-full field-hint", text:
       "Drought mode uses HYD-RESPONSES-style definitions with training-fitted thresholds on the experiment's observed discharge. Water-state predictors are optional and selected separately below. Drought day, event and metric CSVs are included in the run archive. Existing event modes keep their original scoring." }));
     for (const [key, schema] of Object.entries(schemaFor(group).properties)) {
       if (remaining[group]?.includes(key)) continue;
+      if (group === "physics" && key !== "name") continue;
       if (group === "extremes" && key === "mode" && state.config.benchmark.mode !== "none") continue;
       const options = key === "mode" ? group === "forecast" ? ["one_day", "rolling"] : ["none", "statistical", "event_based", "drought"] : undefined;
       field(grid, key, state.config[group][key] ?? schema.default, schema, [group, key], state.bindings, options);
@@ -279,6 +285,7 @@ async function connect() {
   }
   setOptions($("#dataset"), state.datasets.map(d => ({ value: d.dataset_id, label: d.dataset_id + (d.available ? "" : " · unavailable") })), draft?.dataset_id);
   if (!state.datasets.length) $("#dataset").append(option("", "No datasets registered"));
+  state.config.physics = clone(bootstrap.config.physics);
   state.selected = new Set(draft?.config?.basins?.target_basins || []);
   $("#save-leaderboard").disabled = !bootstrap.leaderboard_enabled;
   $("#save-leaderboard").checked = bootstrap.leaderboard_enabled && Boolean(draft?.save_to_leaderboard);
@@ -287,6 +294,7 @@ async function connect() {
   if (!health.worker_ready) notice("The workspace is connected. Start the training worker to process submitted jobs.");
   await loadDataset({ retain: true }).catch(error => notice(error.message, true));
   await loadRuns();
+  await kanCaseStudy.connect(state.datasets).catch(error => notice(error.message, true));
   if (location.hash === "#hydropower") await hydropower.activate();
   try { const saved = JSON.parse(sessionStorage.getItem("runoff.job")); if (saved?.job_id && !state.job) { state.job = saved; schedulePoll(0); } } catch { /* No resumable job. */ }
 }
@@ -298,16 +306,25 @@ async function healthCheck() {
 function ensureNoJob() { if (state.submitting || (state.job && !terminal(state.job.status))) throw new Error("A job is already being tracked. Wait for it to finish or cancel it before submitting another."); }
 async function submitJob(path, body) {
   ensureNoJob(); state.submitting = true; updateLaunch();
-  if (path === "/experiments" && body.config.benchmark.mode !== "none") notice("Checking BAFU date coverage before queueing…", false, true);
-  try { trackJob(await api(path, { method: "POST", body, idempotency: true })); }
+  if (path === "/experiments" && body.config.benchmark.mode !== "none") notice("Checking BAFU observations and date coverage; unusable basins will be skipped…", false, true);
+  if (path === "/experiments") body = automaticBafuRequest(body);
+  try { const job = await api(path, { method: "POST", body, idempotency: true }); trackJob(job); return job; }
   finally { state.submitting = false; updateLaunch(); }
 }
 function trackJob(job) {
   state.job = job; sessionStorage.setItem("runoff.job", JSON.stringify(job)); renderJob(); schedulePoll(0); updateLaunch();
 }
 function renderJob() {
+  const audit = state.job?.basin_selection;
+  const panel = $("#basin-selection-audit");
+  panel.hidden = !audit;
+  if (audit) {
+    $("#basin-selection-summary").textContent = `BAFU coverage checked automatically: ${audit.effective_targets.length} of ${audit.requested_targets.length} requested targets queued; ${audit.training_basins.length} training basins. ${Object.keys(audit.excluded_basins).length} unusable basins skipped.`;
+    renderTable($("#basin-selection-exclusions"), Object.entries(audit.excluded_basins).map(([basin, reason]) => ({ basin, reason })));
+  }
   if (!state.job) return;
   const job = state.job; $("#job-panel").hidden = false;
+  if (job.kind === "kan_case_study") kanCaseStudy.updateJob(job);
   $("#job-kind").textContent = `${pretty(job.kind).toUpperCase()} / ${job.status.toUpperCase()}`;
   $("#job-title").textContent = ({ queued: "In the queue", running: "Following the learning", succeeded: "Ready to explore", cancelled: "Job cancelled", failed: "Job needs attention" })[job.status] || "Connecting to job";
   $("#job-message").textContent = job.error?.message || job.message || "Waiting for a worker update.";
@@ -332,6 +349,7 @@ async function pollJob() {
       chart("#scenario-chart", [ { name: "Baseline", points: (result.daily || []).map(r => ({ x: Date.parse(r.date), y: r.baseline_mm_day })) }, { name: "Proposed site", points: (result.daily || []).map(r => ({ x: Date.parse(r.date), y: r.scenario_mm_day })) } ]);
       if (result.events?.length) renderTable($("#scenario-output"), result.events);
     }
+    if (job.kind === "kan_case_study" && job.status === "succeeded") { location.hash = "kan-case-study"; await kanCaseStudy.showJob(job.job_id); }
     if (job.kind === "gif" && job.status === "succeeded") { location.hash = "replay"; downloadBlob(await api(`/jobs/${job.job_id}/result`, { download: true }), "rainfall-replay.gif"); notice("Rainfall replay GIF is ready."); }
   } catch (error) { notice(`Could not update the job: ${error.message}. Progress will reconnect automatically.`, true); schedulePoll(5000); }
 }
@@ -349,20 +367,20 @@ function renderTable(node, rows) {
 function renderData(node, data) { node.replaceChildren(el("pre", { text: JSON.stringify(data, null, 2) })); }
 function renderRuns() {
   const query = $("#run-search").value.toLowerCase();
-  const rows = state.runs.filter(r => `${r.run_id} ${r.config.strategy?.approach} ${r.config.dataset_id || ""}`.toLowerCase().includes(query));
+  const rows = state.runs.filter(r => `${runName(r)} ${r.run_id} ${r.config.strategy?.approach} ${r.config.dataset_id || ""}`.toLowerCase().includes(query));
   $("#run-count").textContent = `${state.runs.length} of ${state.totalRuns} runs`;
   $("#runs-list").replaceChildren(...rows.map(run => {
-    const metrics = run.aggregate_metrics, approach = pretty(run.config.strategy?.approach || "Experiment");
+    const metrics = run.aggregate_metrics;
     return el("button", { class: "run-card" + (state.run?.run_id === run.run_id ? " selected" : ""), onClick: action(() => openRun(run.run_id)) },
       el("div", { class: "run-card-head" }, el("span", { class: "eyebrow", text: new Date(run.created_at).toLocaleDateString() }), el("span", { class: "tag", text: run.cancelled ? "Partial" : "Completed" })),
-      el("h3", { text: approach }), el("code", { text: run.run_id }),
+      el("h3", { text: runName(run) }), el("code", { text: run.run_id }),
       el("p", { text: `${run.config.basins?.target_basins?.length || 0} catchments · ${format(run.runtime_seconds)} s · ${run.config.hyperparameters?.device || "cpu"}` }),
       el("div", { class: "card-metrics" }, ...Object.entries(metrics).slice(0, 2).map(([k, v]) => el("span", {}, pretty(k), el("strong", { text: format(v) })))));
   }));
   if (!rows.length) $("#runs-list").append(el("div", { class: "empty-state", text: query ? "No runs match your search." : "Your research starts here. Run an experiment to build your library." }));
   $("#more-runs").hidden = state.runs.length >= state.totalRuns;
   for (const picker of document.querySelectorAll(".run-picker")) {
-    setOptions(picker, state.runs.map(r => ({ value: r.run_id, label: `${pretty(r.config.strategy?.approach || "Experiment")} · ${r.run_id}` })));
+    setOptions(picker, state.runs.map(r => ({ value: r.run_id, label: runOptionLabel(r) })));
     if (!picker.options.length) picker.append(option("", "No runs available"));
   }
   populateBasins("replay"); populateBasins("impact");
@@ -498,7 +516,7 @@ async function openRun(id) {
   document.querySelector('[data-download="flood_metrics"]').hidden = !run.config.benchmark_manifest || drought;
   for (const name of ["drought_metrics", "drought_days", "drought_events"]) document.querySelector(`[data-download="${name}"]`).hidden = !drought;
   $("#drought-card").hidden = !drought; $("#event-metrics").hidden = !drought;
-  $("#run-title").textContent = drought ? "Discharge and drought forecasts" : run.config.benchmark_manifest ? "Discharge and high-flow forecasts" : "From rainfall to response";
+  $("#run-title").textContent = runName(run);
   state.hanze = null;
   setOptions($("#flood-map-metric"), floodMetricDefinitions.map(metric => ({ value: metric.key, label: metric.label })));
   state.run = run; $("#run-detail").hidden = false; $("#detail-id").textContent = run.run_id;
@@ -567,8 +585,9 @@ function renderReplayDay() {
   renderData($("#replay-snapshot"), days[day - 1]);
 }
 const hydropower = new HydropowerView(api, renderTable);
+const kanCaseStudy = new KanCaseStudyView(api, submitJob, renderTable, downloadBlob);
 function navigate() {
-  const route = location.hash.slice(1) || "experiments", target = ["experiments", "runs", "compare", "replay", "impact", "hydropower"].includes(route) ? route : "experiments";
+  const route = location.hash.slice(1) || "experiments", target = ["experiments", "runs", "compare", "replay", "impact", "hydropower", "kan-case-study"].includes(route) ? route : "experiments";
   document.querySelectorAll(".view").forEach(node => { node.hidden = node.id !== target; });
   document.querySelectorAll(".header nav a").forEach(node => { node.classList.toggle("active", node.hash === `#${target}`); if (node.hash === `#${target}`) node.setAttribute("aria-current", "page"); else node.removeAttribute("aria-current"); });
   if (target !== "replay") stopPlayback();
@@ -587,6 +606,28 @@ bind("#basin-search", "input", renderBasinList);
 bind("#scope", "change", () => { if (state.config) state.config.basins.training_scope = $("#scope").value; persistDraft(); });
 bind("#save-leaderboard", "change", persistDraft);
 bind("#select-all", "click", () => { state.selected = new Set(state.basins.filter(r => basinAvailability(r, state.config?.benchmark.mode).eligible).map(r => r.basin_id)); selectionChanged(); renderBasinList(); });
+bind("#select-hydropower-50", "click", async () => {
+  if (state.presetLoading) return;
+  state.presetLoading = true; updateLaunch();
+  $("#catchment-preset-status").textContent = "Checking the 50 catchments against your data source and hydropower inventory…";
+  const context = () => ({ dataset: $("#dataset").value, version: state.datasetVersion,
+    mode: state.config?.benchmark.mode || "none", selection: [...state.selected].sort(), scope: $("#scope").value,
+    ready: state.connected && Boolean(state.config) && state.basinsDataset === $("#dataset").value });
+  try {
+    const preset = await selectHydropowerCohort(api, context, ids => {
+      const body = requestBody(); state.config = body.config; state.flags = body;
+      state.config.basins = { ...state.config.basins, target_basins: ids,
+        training_scope: "targets_only", eligible_basins: null };
+      state.selected = new Set(ids); $("#basin-search").value = "";
+      renderConfig(); selectionChanged(); renderBasinList();
+    });
+    $("#catchment-preset-status").textContent = preset
+      ? `Selected 50 fixed catchments · ${preset.matched_plants} hydropower plant locations covered. Training uses these 50 targets only. Dates, source and model settings are preserved; BAFU Run checks date coverage automatically.`
+      : "Selection changed while the preset was loading. Click Hydropower 50 again to apply it.";
+  } catch (error) {
+    $("#catchment-preset-status").textContent = error.message;
+  } finally { state.presetLoading = false; updateLaunch(); }
+});
 bind("#clear-basins", "click", () => { state.selected.clear(); selectionChanged(); renderBasinList(); });
 bind("#validate-dataset", "click", async () => { const result = await api(`/datasets/${encodeURIComponent($("#dataset").value)}/validation`); notice(`Dataset verified. ${result.eligible_basins} eligible catchments.`, false, true); });
 bind("#validate-config", "click", async () => { notice("Checking setup and data coverage…", false, true); const result = await api("/experiments/validate", { method: "POST", body: requestBody() }); notice(result.valid ? `Setup checked. ${result.data_check}` : "Review the setup."); });

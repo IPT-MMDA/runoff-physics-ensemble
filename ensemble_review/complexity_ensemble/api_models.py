@@ -22,6 +22,25 @@ class Contract(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
+class HydropowerEnergyRequest(Contract):
+    head_m: float = Field(default=100, gt=0, le=10000)
+    efficiency: float = Field(default=0.9, gt=0, le=1)
+    environmental_flow_m3_s: float = Field(default=0, ge=0, le=1e7)
+    max_turbine_flow_m3_s: float | None = Field(default=None, gt=0, le=1e7)
+    shortfall_eur_mwh: float = Field(default=50, ge=0, le=1e7)
+    surplus_eur_mwh: float = Field(default=20, ge=0, le=1e7)
+
+
+class HydropowerComparisonRequest(Contract):
+    run_a: str = Field(min_length=1)
+    run_b: str = Field(min_length=1)
+    start: date | None = None
+    end: date | None = None
+    target_date: date | None = None
+    lead_day: int = Field(default=1, ge=1, le=366)
+    scenario: HydropowerEnergyRequest = Field(default_factory=HydropowerEnergyRequest)
+
+
 def configuration_model(cls):
     hints = get_type_hints(cls)
     definitions = {}
@@ -94,6 +113,17 @@ class ExperimentRequest(Contract):
     use_camels_chem: StrictBool = False
     use_hyd_responses: StrictBool = False
     save_to_leaderboard: StrictBool = False
+    skip_unusable_basins: StrictBool = False
+
+
+from .kan_case_study import CaseStudyConfig
+
+CaseStudyConfiguration = configuration_model(CaseStudyConfig)
+
+
+class CaseStudyRequest(Contract):
+    dataset_id: str = Field(min_length=1, max_length=80)
+    config: CaseStudyConfiguration
 
 
 class ComparisonRequest(Contract):
@@ -142,10 +172,12 @@ class JobResponse(Contract):
     result: dict | None = None
     error: dict | None = None
     links: dict[str, str]
+    basin_selection: dict | None = None
 
 
 class RunResponse(Contract):
     run_id: str
+    display_name: str = ""
     created_at: str
     config: dict
     requested_config: dict | None = None

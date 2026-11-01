@@ -251,13 +251,6 @@ class _HydrologyModelBase(nn.Module):
         self.register_buffer("discharge_scale", torch.as_tensor(discharge_scale).reshape(()).float())
         self.raw_response = nn.Parameter(torch.tensor(0.0))
         self.raw_recession = nn.Parameter(torch.tensor(-2.0))
-        self.physics_correction: nn.Module | None = None
-
-    def set_physics_correction(self, correction: nn.Module | None) -> None:
-        """Attach a frozen, data-derived correction to the reservoir balance."""
-        self.physics_correction = correction
-        if correction is not None:
-            correction.requires_grad_(False)
 
     def _positive_discharge(self, raw: torch.Tensor) -> torch.Tensor:
         return F.softplus(raw)
@@ -274,8 +267,6 @@ class _HydrologyModelBase(nn.Module):
         response, recession = self.reservoir_parameters()
         effective_precipitation = F.relu(precipitation - pet)
         expected_change = response * effective_precipitation - recession * previous_flow
-        if self.physics_correction is not None:
-            expected_change = expected_change + self.physics_correction(physical_inputs)
         predicted_flow = prediction.squeeze(-1) * self.discharge_scale
         return (predicted_flow - previous_flow - expected_change) / self.discharge_scale
 

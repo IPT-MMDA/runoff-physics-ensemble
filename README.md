@@ -81,8 +81,7 @@ use a separate, past-only discharge history (365 days by default), with adjustab
 embedding dimension and delay. Rolling forecasts replace future discharge in
 both model and routing histories with predictions. PH requires the `tda` extra
 (`ripser`), already included by the root requirements. Invalid estimates fall
-back to the simple expert. Other training approaches ignore the routing choice,
-except when a routed physics-distillation teacher is selected.
+back to the simple expert. Other training approaches ignore the routing choice.
 
 The replay's **input-to-prediction diagram** shows which dates feed each
 forecast and which day's discharge is predicted. Its separate teaching bucket
@@ -138,8 +137,8 @@ python -c 'import torch; print(torch.backends.mps.is_available())'
 Training uses float32 on Metal. Double-precision metrics, stacking, and OOD
 analysis run on CPU when necessary; OOD scores return to the training device.
 Seeded permutations and observation noise are generated on CPU for MPS.
-Optional PyKAN discovery and correction evaluation also run on CPU, returning
-correction predictions to the training device. The Mamba implementation uses
+The KAN case study has an independent auto/CPU/CUDA/MPS selector. PyKAN fitting
+uses CPU on MPS; symbolic extraction and scoring use CPU. The Mamba implementation uses
 ordinary PyTorch and does not require CUDA extensions.
 
 Performance depends on model size, sequence length, and batch size; compare
@@ -312,8 +311,14 @@ or **BAFU + CAMELS predictors**. The map and list follow station compatibility;
 unavailable catchments show a reason and cannot be selected. BAFU availability
 here checks local station metadata and catchment area, plus CAMELS predictor
 availability in combined mode. **Check benchmark coverage** audits daily discharge
-and date windows. BAFU setup validation and submission also run this audit before
-queueing; strict cohorts with incomplete coverage are rejected.
+and date windows. Clicking **Run experiment** checks BAFU observations and date
+coverage automatically, skips entire basins with conflicting/invalid observations
+or unusable windows, and queues the remaining targets and training basins. A
+**BAFU basin selection** summary lists the skipped IDs and reasons; the audit is
+also retained with the saved run. If no usable training/target cohort remains,
+the run is rejected before queueing. Manual checks remain available. API clients
+can opt into this behavior with `skip_unusable_basins: true`; otherwise strict
+cohort requests retain their rejection behavior.
 
 For BAFU drought experiments, choose **BAFU benchmark → Event task → Drought
 events**. Predictions remain daily discharge; seven-day low flows are evaluated
@@ -331,6 +336,9 @@ time series averaged across seeds. Complete predictions remain in the exports.
 Hydropower monitoring is available in the main workspace under **Hydropower**
 (`/#hydropower`) without extra startup flags. Select a catchment dataset, a completed
 run, and a prediction date; leave the date blank for the latest available prediction.
+The same view compares **Run A versus Run B** against shared observations, with two
+error maps, paired accuracy metrics and an editable daily energy-cost scenario.
+See the [hydropower case study](ensemble_review/HYDROPOWER_CASE_STUDY.md).
 
 To also use the original Gradio experiment interface at `/gradio`, add
 `--native-dataset camels-ch` to the studio command. This selects one registered
@@ -382,6 +390,15 @@ verification. See [BAFU benchmarks](ensemble_review/BAFU_BENCHMARKS.md).
 ## Hydropower monitoring map
 
 The main Studio workspace includes a **Hydropower** view at `/#hydropower`.
+Its **Run A versus Run B** comparison uses shared observations, matching forecast
+issues and leads, and full-resolution catchments. Side-by-side error maps share a
+colour scale. Editable head, efficiency, environmental flow, turbine-flow limits
+and shortfall/surplus penalties convert daily flow errors into simulated costs.
+Savings compare A with B's forecast-related cost baseline. Totals represent one
+abstract plant per uniquely mapped basin, rather than actual fleet spending.
+Download the comparison JSON to retain settings, metrics and the exclusion audit.
+See [method, assumptions and API](ensemble_review/HYDROPOWER_CASE_STUDY.md).
+
 Launch Studio normally; neither `--native-dataset` nor an extra worker flag is needed.
 Opening the view loads the station inventory on demand. Choose a registered catchment
 dataset and a completed model run, select a date (blank means latest), and click
@@ -396,7 +413,8 @@ green rising flow. Gray means a matching prediction or a previous-day comparison
 unavailable. Predictions are averaged across ensemble seeds. Flow in m³/s requires
 a basin area attribute. These experiment/back-test outputs are not automatically
 live forecasts; operational forecasts require future-target predictions and the
-corresponding meteorological inputs. Electricity generation is not calculated.
+corresponding meteorological inputs. This single-run monitor does not calculate
+electricity generation; the comparison above calculates an explicit energy scenario.
 
 The official Swiss Federal Office of Energy WASTA inventory covers Swiss hydropower
 plants with output of at least 300 kW. Source:
@@ -408,3 +426,18 @@ remains available if the map library cannot load. See [configuration](HYDROPOWER
 
 The optional Gradio interface at `/gradio` retains its **Hydropower monitoring** tab,
 including the ability to inspect the current session's experiment result.
+
+
+## KAN low-data transfer case study
+
+Open **KAN case study** in Studio, or **KAN low-data case study** in Gradio.
+This independent workflow trains a neural runoff relationship on data-rich
+source catchments, distils it into a symbolic approximation, then calibrates
+three parameters using limited discharge observations in target catchments.
+The former KAN reservoir-correction modes have been removed from regional
+experiments. Old enabled configurations produce a migration error; historical
+saved results remain readable.
+
+See [the protocol and usage guide](ensemble_review/KAN_CASE_STUDY.md) and
+[the execution plan](KAN_CASE_STUDY_PLAN.md). The study requires the `kan` extra,
+already included in the root requirements.

@@ -88,7 +88,7 @@ def prepare_bafu(config, catalog, relevant, start, end):
     areas = station_areas(catalog)
     observed, provenance = load_observations(config.bafu_root, relevant, start, end,
         target=config.benchmark.target, areas=areas, release_states=config.benchmark.release_states,
-        day_timezone=config.benchmark.day_timezone)
+        day_timezone=config.benchmark.day_timezone, skip_invalid_basins=not config.benchmark.strict_cohort)
     if config.benchmark.mode == 'bafu_only':
         return observed, provenance
     predictors = {}; failures = {}
@@ -240,12 +240,37 @@ def manifest(config, data, series, provenance):
     return report
 
 
-def preflight(config, catalog):
+def preflight(config, catalog, *, skip_unusable=False):
     """Uses the same preparation as execution; never constructs or fits a model."""
-    from .regional import prepare_regional_data
+    from .regional import prepare_regional_data, preview_regional_hydrology_data
     from dataclasses import replace
+    from types import SimpleNamespace
     audit_config = replace(config, benchmark=replace(config.benchmark, strict_cohort=False))
     _, data, series, provenance = prepare_regional_data(audit_config, catalog=catalog, audit_only=True)
+    if skip_unusable:
+        # Window coverage alone does not ensure a target has a usable training
+        # reference, official threshold or seven-day drought verification window.
+        failures = {}
+        train = config.dates.train.resolved()
+        for basin in data.target_basins:
+            try:
+                if not any(train.contains(day) for day in series[basin].dates):
+                    raise ValueError('No training reference observations')
+                threshold_values(audit_config, series, (basin,), provenance.get('areas_km2', {}))
+                if config.extremes.mode == 'drought':
+                    single = SimpleNamespace(target_basins=(basin,), test=data.test)
+                    drought_coverage(audit_config, single, series)
+            except ValueError as error:
+                failures[basin] = str(error)
+        if failures:
+            previous_exclusions = dict(data.skipped_basins)
+            series = {basin: value for basin, value in series.items() if basin not in failures}
+            scope = replace(config.basins, eligible_basins=config.basins.eligible_basins or catalog.eligible_ids)
+            data = preview_regional_hydrology_data(series, provenance['training_static_attributes'],
+                scope, config.dates, sequence_length=config.hyperparameters.sequence_length,
+                routing_context_length=provenance['context_length'])
+            data.skipped_basins.update(previous_exclusions)
+            data.skipped_basins.update(failures)
     report = manifest(audit_config, data, series, provenance)
     expected = set(config.basins.target_basins)
     report['strict_cohort_requested'] = config.benchmark.strict_cohort

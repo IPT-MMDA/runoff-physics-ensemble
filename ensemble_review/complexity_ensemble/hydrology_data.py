@@ -127,6 +127,7 @@ def load_camels_ch(
     start: str | None = "2000-01-01",
     end: str | None = "2020-12-31",
     include_landcover: bool = True,
+    allow_missing_discharge: bool = False,
 ) -> HydrologySeries:
     """Load observed specific discharge and simulation-based meteorological forcing."""
     root = Path(root)
@@ -164,8 +165,12 @@ def load_camels_ch(
             if cover is None:
                 continue
             values.extend(cover)
-        if discharge is None or discharge < 0.0 or any(value is None for value in values):
+        if any(value is None for value in values):
             continue
+        if discharge is None or discharge < 0.0:
+            if not allow_missing_discharge:
+                continue
+            discharge = float("nan")
         records.append((day, discharge, [float(value) for value in values]))
     return _series_from_records(records, forcing_names, basin_id=basin_id, country="Switzerland")
 

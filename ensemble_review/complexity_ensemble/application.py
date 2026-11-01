@@ -24,6 +24,16 @@ class Application:
     def catalog(self, dataset_id):
         return CAMELSCHCatalog(self.registration(dataset_id).data_root)
 
+    def case_study_config(self, payload):
+        from .kan_case_study import config_from_dict
+        config = config_from_dict(payload["config"])
+        resolve_device(config.device)
+        eligible = set(self.catalog(payload["dataset_id"]).eligible_ids)
+        requested = set((*config.source_basins, *config.validation_basins, *config.target_basins))
+        if requested - eligible:
+            raise ValueError("Case-study cohorts contain unavailable CAMELS-CH basins")
+        return config
+
     def experiment_config(self, payload, *, check_data=True):
         registration = self.registration(payload["dataset_id"])
         cfg = payload["config"]
@@ -107,6 +117,34 @@ class Application:
                 "available_dates": sorted({row.target_date.isoformat() for row in predictions.predictions}),
                 "matched": int(sites["basin_id"].notna().sum()),
                 "with_change": int(sites["change_pct"].notna().sum()), "total": len(sites)}
+
+    def hydropower_comparison(self, payload):
+        from .hydropower_comparison import EnergyScenario, compare_hydropower
+        dataset_id = self.dataset_for_run(payload.run_a)
+        if self.dataset_for_run(payload.run_b) != dataset_id:
+            raise ValueError("Hydropower comparison requires runs from the same registered dataset")
+        result = compare_hydropower(
+            self.runs.artifact(payload.run_a, "predictions"),
+            self.runs.artifact(payload.run_b, "predictions"),
+            CAMELSCHCatalog(self.registration(dataset_id).data_root, simplify_geometry=False),
+            self.hydropower_sites,
+            config_a=self.runs.get(payload.run_a).config,
+            config_b=self.runs.get(payload.run_b).config,
+            start=payload.start, end=payload.end, target_date=payload.target_date,
+            lead_day=payload.lead_day, scenario=EnergyScenario(**payload.scenario.model_dump()),
+        )
+        from .result_registry import run_display_name
+        return {**result, "dataset_id": dataset_id, "run_a": payload.run_a, "run_b": payload.run_b,
+                "run_a_name": run_display_name(self.runs.get(payload.run_a).config),
+                "run_b_name": run_display_name(self.runs.get(payload.run_b).config)}
+
+    def hydropower_training_cohort(self, dataset_id, mode='none'):
+        from .bafu import basin_compatibility
+        from .hydropower_cohort import hydropower_training_cohort
+        registration = self.registration(dataset_id)
+        catalog = CAMELSCHCatalog(registration.data_root, simplify_geometry=False)
+        return hydropower_training_cohort(catalog, self.hydropower_sites, mode=mode,
+            compatibility=basin_compatibility(catalog, registration.bafu_root))
 
     def evaluate_hanze(self, dataset_id, predictions, config):
         root = self.registration(dataset_id).hanze_root

@@ -44,11 +44,34 @@ def run_job(application, store, job, owner):
     progress = lambda fraction, message: store.progress(job["id"], owner, fraction, message)
     if token.cancelled:
         return None
+    if job["kind"] not in {"experiment", "kan_case_study", "scenario", "gif"}:
+        raise ValueError(f"Unsupported job kind {job['kind']!r}; update and restart the training worker")
+    if job["kind"] == "kan_case_study":
+        from .kan_case_study import run_case_study, save_case_study, StudyCancelled
+        config = application.case_study_config(payload)
+        try:
+            result = run_case_study(config, catalog=application.catalog(payload["dataset_id"]),
+                                    progress=progress, cancellation_token=token)
+        except StudyCancelled:
+            return None
+        if token.cancelled:
+            return None
+        result["dataset_id"] = payload["dataset_id"]
+        folder = application.settings.storage_dir / "job-results" / job["id"]
+        save_case_study(result, folder)
+        return {"artifact": "kan_case_study", "metric_rows": len(result["metrics"]),
+                "local_parameter_count": result["local_parameter_count"]}
     if job["kind"] == "experiment":
         config = application.experiment_config(payload)
         result = execute_experiment(config, progress, token)
         result.resolved_config["dataset_id"] = payload["dataset_id"]
         result.resolved_config["requested_config"] = public_config(config)
+        if payload.get("basin_selection_audit"):
+            audit = payload["basin_selection_audit"]
+            result.resolved_config["basin_selection_audit"] = audit
+            result.resolved_config.setdefault("skipped_basins", {}).update(audit["excluded_basins"])
+            if result.resolved_config.get("benchmark_manifest"):
+                result.resolved_config["benchmark_manifest"]["excluded_basins"].update(audit["excluded_basins"])
         if application.registration(payload["dataset_id"]).hanze_root is not None:
             progress(0.99, "Evaluating documented HANZE flood events")
             # Catalogue failures must not discard successfully trained discharge results.
@@ -67,7 +90,9 @@ def run_job(application, store, job, owner):
         return {"run_id": saved.run_id, "partial": result.cancelled,
                 "warnings": result.failures, "has_failures": bool(result.failures),
                 "execution_failed": not result.predictions and not result.cancelled}
-    run_id = payload["run_id"]
+    run_id = payload.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise ValueError(f"{job['kind']} jobs require an existing run_id")
     result = application.runs.result(run_id)
     catalog = application.catalog_for_run(run_id)
     if job["kind"] == "scenario":

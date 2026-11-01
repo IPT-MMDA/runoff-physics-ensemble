@@ -76,6 +76,101 @@ class BAFUBenchmarks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'area'):
             load_observations(self.bafu,['2011'],self.days[0],self.days[-1])
 
+    def add_invalid_basin(self):
+        self.rows.extend([{**row, 'station_no': '2012'} for row in self.rows[:40]])
+        self.rows.append({**self.rows[-1], 'value': '999'})
+        self.write_rows()
+        self.catalog = CAMELSCHCatalog(self.catalog.root, [*self.catalog.records,
+            BasinCatalogRecord('2012', static_attributes={'area': 86.4})])
+
+    def test_tolerant_read_excludes_whole_conflicting_basin(self):
+        self.add_invalid_basin()
+        series, provenance = load_observations(self.bafu, ['2011', '2012'], self.days[0], self.days[-1],
+            areas={'2011': 86.4, '2012': 86.4}, skip_invalid_basins=True)
+        self.assertEqual(set(series), {'2011'})
+        self.assertIn('Conflicting', provenance['observation_load_failures']['2012'])
+        self.assertEqual(len(series['2011'].dates), 40)
+
+    def test_run_can_automatically_skip_conflicting_and_missing_basins(self):
+        self.add_invalid_basin()
+        self.catalog = CAMELSCHCatalog(self.catalog.root, [*self.catalog.records,
+            BasinCatalogRecord('2013', static_attributes={'area': 86.4})])
+        settings = ServerSettings(self.root/'state', {'ch': DatasetRegistration(self.catalog.root, bafu_root=self.bafu)})
+        application = Application(settings); application.catalog = lambda _: self.catalog
+        for scope in ('targets_only', 'all_basins'):
+            body = {'dataset_id': 'ch', 'skip_unusable_basins': True, 'config': {
+                **self.mapping, 'basins': {'target_basins': ['2011', '2012', '2013'], 'training_scope': scope}}}
+            with TestClient(create_app(settings, application=application)) as client:
+                with patch('complexity_ensemble.regional.RoutedHydrologyModel', side_effect=AssertionError('No model during audit')):
+                    response = client.post('/api/v1/experiments', json=body)
+                self.assertEqual(response.status_code, 202, response.text)
+                job = response.json(); audit = job['basin_selection']
+                self.assertEqual(audit['effective_targets'], ['2011'])
+                self.assertEqual(audit['training_basins'], ['2011'])
+                self.assertIn('Conflicting', audit['excluded_basins']['2012'])
+                self.assertIn('2013', audit['excluded_basins'])
+                fetched = client.get('/api/v1/jobs/' + job['job_id']).json()
+                self.assertEqual(fetched['basin_selection'], audit)
+                queued = client.app.state.jobs.get(job['job_id'])['payload']
+                self.assertEqual(queued['config']['basins']['target_basins'], ['2011'])
+                self.assertEqual(queued['config']['basins']['eligible_basins'], ['2011'])
+                self.assertTrue(queued['config']['benchmark']['strict_cohort'])
+                prepare_regional_data(application.experiment_config(queued), catalog=self.catalog)
+                from complexity_ensemble.worker import run_job
+                store = client.app.state.jobs
+                store.acquire_worker('audit-worker', stale_after=0)
+                claimed = store.claim('audit-worker')
+                result = ExperimentResult([PredictionRecord(0, '2011', self.days[-1], 1, 1, 0)],
+                    {}, {}, {}, {}, [], [], {'benchmark_manifest': {'excluded_basins': {}}})
+                with patch('complexity_ensemble.services.execute_experiment', return_value=result), \
+                     patch.object(application.runs, 'save', return_value=SimpleNamespace(run_id='kept')):
+                    output = run_job(application, store, claimed, 'audit-worker')
+                self.assertEqual(result.resolved_config['basin_selection_audit'], audit)
+                self.assertEqual(result.resolved_config['skipped_basins'], audit['excluded_basins'])
+                self.assertEqual(result.resolved_config['benchmark_manifest']['excluded_basins'], audit['excluded_basins'])
+                self.assertFalse(output['execution_failed'])
+                store.finish(job['job_id'], 'audit-worker', result=output)
+                store.release_worker('audit-worker')
+
+    def test_automatic_audit_skips_invalid_units_and_malformed_values(self):
+        for bad in ({'unit_symbol': 'litres'}, {'value': 'invalid'}, {'timestamp': 'invalid'}):
+            with self.subTest(bad=bad):
+                original = self.rows[:40]
+                self.rows = original + [{**row, 'station_no': '2012'} for row in original]
+                self.rows[-1].update(bad); self.write_rows()
+                series, provenance = load_observations(self.bafu, ['2011', '2012'], self.days[0], self.days[-1],
+                    areas={'2011': 86.4, '2012': 86.4}, skip_invalid_basins=True)
+                self.assertEqual(set(series), {'2011'})
+                self.assertIn('2012', provenance['observation_load_failures'])
+
+    def test_automatic_audit_skips_a_target_without_training_reference(self):
+        original = self.rows[:]
+        self.rows += [{**row, 'station_no': '2012'} for row in original[18:]]
+        self.rows += [{**row, 'station_no': '2013'} for row in original]
+        self.write_rows()
+        catalog = CAMELSCHCatalog(self.catalog.root, [*self.catalog.records,
+            BasinCatalogRecord('2012', static_attributes={'area': 86.4}),
+            BasinCatalogRecord('2013', static_attributes={'area': 86.4})])
+        config = replace(self.config, basins=replace(self.config.basins,
+            target_basins=('2011', '2012'), training_scope='exclude_targets',
+            eligible_basins=('2011', '2012', '2013')))
+        report = preflight(config, catalog, skip_unusable=True)
+        self.assertEqual(report['effective_targets'], ['2011'])
+        self.assertEqual(report['training_basins'], ['2013'])
+        self.assertIn('training reference', report['excluded_basins']['2012'])
+
+    def test_automatic_skip_rejects_an_empty_cohort_before_queueing(self):
+        self.rows.append({**self.rows[0], 'value': '999'}); self.write_rows()
+        settings = ServerSettings(self.root/'state', {'ch': DatasetRegistration(self.catalog.root, bafu_root=self.bafu)})
+        application = Application(settings); application.catalog = lambda _: self.catalog
+        with TestClient(create_app(settings, application=application)) as client:
+            response = client.post('/api/v1/experiments', json={
+                'dataset_id': 'ch', 'config': self.mapping, 'skip_unusable_basins': True})
+            self.assertEqual(response.status_code, 422, response.text)
+            import sqlite3
+            with sqlite3.connect(settings.jobs_path) as connection:
+                self.assertEqual(connection.execute('select count(*) from jobs').fetchone()[0], 0)
+
     def test_missing_observations_are_gaps_for_daily_mean_and_max(self):
         for target, aggregation in [('daily_mean', '1day_mean'), ('daily_max', '1day_max')]:
             with self.subTest(target=target):

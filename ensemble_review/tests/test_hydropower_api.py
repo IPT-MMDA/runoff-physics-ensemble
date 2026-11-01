@@ -118,3 +118,56 @@ class HydropowerAPITests(unittest.TestCase):
         response = self.client.get("/api/v1/hydropower/sites")
         self.assertEqual(response.status_code, 422, response.text)
         self.assertNotIn(str(self.root), response.text)
+
+    def comparison_predictions(self):
+        self.predictions.write_text(
+            "seed,basin_id,target_date,observed_mm_day,predicted_mm_day\n"
+            "1,basin,2024-01-01,4,5\n1,basin,2024-01-02,8,7\n")
+
+    def test_comparison_returns_shared_errors_economics_and_full_geometry_catalog(self):
+        self.comparison_predictions()
+        with patch("complexity_ensemble.application.CAMELSCHCatalog", return_value=self.catalog) as factory:
+            response = self.client.post("/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "legacy"})
+        self.assertEqual(response.status_code, 200, response.text)
+        factory.assert_called_once_with(self.root / "data", simplify_geometry=False)
+        payload = response.json()
+        self.assertEqual((payload["dataset_id"], payload["basins"], payload["samples"]), ("ch", 1, 2))
+        self.assertEqual(payload["economics"]["cost_index_a"], 100)
+        self.assertEqual(payload["economics"]["saving_eur"], 0)
+        self.assertEqual(payload["map"]["features"][0]["properties"]["error_a_m3_s"], -1)
+        self.assertNotIn(str(self.root), response.text)
+
+    def test_comparison_requires_authentication_and_enabled_feature(self):
+        self.client.headers.clear()
+        response = self.client.post("/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "one"})
+        self.assertEqual(response.status_code, 401)
+        settings = replace(self.settings, hydropower=HydropowerSettings(enabled=False))
+        with TestClient(create_app(settings, application=self.application)) as client:
+            response = client.post("/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "one"},
+                                   headers={"Authorization": "Bearer test-token"})
+        self.assertEqual(response.status_code, 409)
+
+    def test_comparison_rejects_missing_runs_other_datasets_and_invalid_assumptions(self):
+        for body, status in (
+            ({"run_a": "missing", "run_b": "one"}, 404),
+            ({"run_a": "one", "run_b": "unregistered"}, 404),
+            ({"run_a": "one", "run_b": "one", "scenario": {"efficiency": 2}}, 422),
+            ({"run_a": "one", "run_b": "one", "scenario": {"shortfall_eur_mwh": -1}}, 422),
+            ({"run_a": "one", "run_b": "one", "lead_day": 0}, 422),
+        ):
+            response = self.client.post("/api/v1/hydropower/compare", json=body)
+            self.assertEqual(response.status_code, status, response.text)
+        self.application.dataset_for_run = lambda run_id: run_id
+        response = self.client.post("/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "legacy"})
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("same registered dataset", response.text)
+
+    def test_comparison_requires_observations_and_reports_bad_periods(self):
+        with patch("complexity_ensemble.application.CAMELSCHCatalog", return_value=self.catalog):
+            response = self.client.post("/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "one"})
+            self.assertEqual(response.status_code, 422)
+            self.assertIn("observed_mm_day", response.text)
+            self.comparison_predictions()
+            response = self.client.post("/api/v1/hydropower/compare", json={"run_a": "one", "run_b": "one",
+                "start": "2024-01-02", "end": "2024-01-01"})
+        self.assertEqual(response.status_code, 422)

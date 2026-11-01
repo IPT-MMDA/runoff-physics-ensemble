@@ -31,7 +31,7 @@ FILTER_FIELDS: tuple[tuple[str, str], ...] = (
     ("model.complex_expert", "Complex expert"),
     ("model.simple_expert", "Simple expert"),
     ("strategy.epochs", "Epochs"),
-    ("physics.optimization_mode", "KAN / physics optimization"),
+    ("physics.optimization_mode", "Legacy physics optimization"),
     ("physics.distillation_teacher", "Physics teacher"),
     ("basins.training_scope", "Training scope"),
     ("hyperparameters.sequence_length", "Sequence length"),
@@ -91,6 +91,13 @@ def display_value(value: object) -> str:
     return str(value)
 
 
+def run_display_name(config) -> str:
+    """Readable, deterministic name; run IDs remain the stable storage keys."""
+    model = config.get("model", {}).get("complex_expert", "model")
+    approach = config.get("strategy", {}).get("approach", "experiment")
+    return f"{model}_{approach}"
+
+
 @dataclass(frozen=True)
 class SavedRun:
     run_id: str
@@ -114,16 +121,18 @@ class SavedRun:
         return display_value(_nested(self.config, field))
 
     @property
+    def display_name(self) -> str:
+        return run_display_name(self.config)
+
+    @property
     def label(self) -> str:
-        approach = self.value("strategy.approach")
         complex_expert = self.value("model.complex_expert")
         simple_expert = self.value("model.simple_expert")
         epochs = self.value("strategy.epochs")
-        physics = self.value("physics.optimization_mode")
         stamp = self.created_at.replace("T", " ").replace("Z", " UTC")
         return (
-            f"{approach} · {complex_expert}+{simple_expert} · {epochs} epochs · "
-            f"KAN {physics} · {stamp} · {self.run_id[-8:]}"
+            f"{self.display_name} · {complex_expert}+{simple_expert} · {epochs} epochs · "
+            f"{stamp} · {self.run_id[-8:]}"
         )
 
 

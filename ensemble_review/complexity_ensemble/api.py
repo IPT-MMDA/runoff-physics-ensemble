@@ -22,13 +22,14 @@ from starlette.background import BackgroundTask
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .api_models import (ComparisonRequest, ErrorResponse, ExperimentRequest, JobResponse,
-                         ReplayRequest, ScenarioRequest, RunResponse, RunsResponse, PredictionsResponse)
+                         ReplayRequest, ScenarioRequest, RunResponse, RunsResponse, PredictionsResponse,
+                         CaseStudyRequest, HydropowerComparisonRequest)
 from .application import Application
 from .devices import DEVICE_CHOICES
 from .jobs import JobStore, QueueConflict
 from .paved_scenario import PavedSiteConfig
 from .rainfall_replay import forecast_snapshot
-from .result_registry import FILTER_FIELDS, available_values, filter_runs
+from .result_registry import FILTER_FIELDS, available_values, filter_runs, run_display_name
 from .serialization import json_safe, public_config
 from .server_settings import ServerSettings
 from .services import basin_metadata, compare_runs, prepare_replay, replay_episodes, result_summary
@@ -115,7 +116,8 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
                 "cancel_requested": job["cancel_requested"],
                 "created_at": datetime.fromtimestamp(job["created_at"], timezone.utc).isoformat(),
                 "updated_at": datetime.fromtimestamp(job["updated_at"], timezone.utc).isoformat(),
-                "result": json_safe(job["result"]), "error": job["error"], "links": links}
+                "result": json_safe(job["result"]), "error": job["error"], "links": links,
+                "basin_selection": job["payload"].get("basin_selection_audit")}
 
     def submit(kind, payload, key):
         if key is not None and not 1 <= len(key) <= 200:
@@ -186,8 +188,25 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
             except (KeyError, ValueError, OSError):
                 skipped += 1
                 continue
-            items.append({"run_id": run.run_id, "dataset_id": dataset_id, "created_at": run.created_at})
+            items.append({"run_id": run.run_id, "dataset_id": dataset_id, "created_at": run.created_at,
+                          "display_name": run_display_name(run.config)})
         return {"items": items, "skipped": skipped}
+
+    @router.get("/datasets/{dataset_id}/hydropower-cohort")
+    def hydropower_cohort(dataset_id: str, mode: str = 'none'):
+        require_hydropower()
+        try:
+            return application.hydropower_training_cohort(dataset_id, mode)
+        except OSError as exc:
+            raise HTTPException(422, "The hydropower catchment preset needs a readable plant inventory.") from exc
+
+    @router.post("/hydropower/compare")
+    def hydropower_compare(payload: HydropowerComparisonRequest):
+        require_hydropower()
+        try:
+            return application.hydropower_comparison(payload)
+        except OSError as exc:
+            raise HTTPException(422, "Hydropower station or comparison data are unavailable; check the server configuration.") from exc
 
     @router.get("/runs/{run_id}/hydropower")
     def hydropower_forecast(run_id: str, target_date: date | None = None):
@@ -300,8 +319,70 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
         payload = body.model_dump(mode="json")
         config = application.experiment_config(payload)
         if config.benchmark.mode != "none":
-            checked_benchmark(body, config)
+            if body.skip_unusable_basins:
+                from .benchmarks import preflight
+                report = preflight(config, application.catalog(body.dataset_id), skip_unusable=True)
+                targets, training = report["effective_targets"], report["training_basins"]
+                if not targets or not training:
+                    raise ValueError("No usable BAFU training and target basins remain")
+                payload["basin_selection_audit"] = {
+                    "requested_targets": list(config.basins.target_basins),
+                    "effective_targets": targets, "training_basins": training,
+                    "excluded_basins": report["excluded_basins"],
+                }
+                payload["config"]["basins"].update(target_basins=targets,
+                    eligible_basins=sorted(set(targets) | set(training)))
+                # Freeze the audited cohort for the worker. Changes to the data
+                # after queueing must not silently drop further stations.
+                payload["config"]["benchmark"]["strict_cohort"] = True
+                application.experiment_config(payload)
+            else:
+                checked_benchmark(body, config)
         return submit("experiment", payload, idempotency_key)
+
+    @router.get("/case-studies/kan/defaults")
+    def case_study_defaults():
+        from .kan_case_study import CaseStudyConfig, COMPARISON_MODELS
+        return {"config": asdict(CaseStudyConfig()), "comparison_models": list(COMPARISON_MODELS),
+                "schema": CaseStudyRequest.model_json_schema()}
+
+    @router.get("/case-studies/kan")
+    def case_studies():
+        return {"items": [job_response(job) for job in store.list_kind("kan_case_study")]}
+
+    @router.post("/case-studies/kan/coverage")
+    def case_study_coverage(body: CaseStudyRequest):
+        from .kan_case_study import config_from_dict
+        from .kan_coverage import coverage_inventory
+        config = config_from_dict(body.config.model_dump(), require_cohorts=False)
+        return coverage_inventory(config, application.catalog(body.dataset_id))
+
+    @router.post("/case-studies/kan/validate")
+    def validate_case_study(body: CaseStudyRequest):
+        from .kan_case_study import prepare_data
+        config = application.case_study_config(body.model_dump(mode="json"))
+        data = prepare_data(config, application.catalog(body.dataset_id))
+        return {"valid": True, "training_started": False,
+                "coverage": {basin: {"train": int(d.train.sum()), "validation": int(d.validation.sum()),
+                                     "test": int(d.test.sum())} for basin, d in data.items()}}
+
+    @router.post("/case-studies/kan", status_code=202, response_model=JobResponse)
+    def case_study(body: CaseStudyRequest, idempotency_key: str | None = Header(None)):
+        payload = body.model_dump(mode="json")
+        config = application.case_study_config(payload)
+        if config.needs_kan() and importlib.util.find_spec("kan") is None:
+            raise ValueError("The KAN case study requires the optional pykan dependency")
+        return submit("kan_case_study", payload, idempotency_key)
+
+    @router.get("/case-studies/kan/jobs/{job_id}/archive")
+    def case_study_archive(job_id: str):
+        job = store.get(job_id)
+        if job["kind"] != "kan_case_study" or job["status"] != "succeeded":
+            raise HTTPException(409, "A completed KAN case study is required")
+        path = settings.storage_dir / "job-results" / job["id"] / "kan_case_study.zip"
+        if not path.is_file():
+            raise KeyError("Case-study archive not found")
+        return FileResponse(path, media_type="application/zip", filename="kan_case_study.zip")
 
     def checked_benchmark(body, config):
         from .benchmarks import preflight
@@ -328,7 +409,8 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
             raise HTTPException(409, "This job has no retrievable result yet")
         if job["kind"] == "experiment":
             return result_summary(application.runs.get(job["result"]["run_id"]))
-        name = "scenario.json" if job["kind"] == "scenario" else "replay.gif"
+        name = ("case_study.json" if job["kind"] == "kan_case_study" else
+                "scenario.json" if job["kind"] == "scenario" else "replay.gif")
         folder = (settings.storage_dir / "job-results" / job["id"]).resolve()
         path = (folder / name).resolve()
         if path.parent != folder or not path.is_file():

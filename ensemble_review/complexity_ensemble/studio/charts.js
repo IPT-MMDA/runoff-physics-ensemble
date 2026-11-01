@@ -7,7 +7,7 @@ function svgEl(tag, attrs = {}, text) {
   if (text != null) node.textContent = text;
   return node;
 }
-export function chart(container, series, { scatter = false, date = true, marker = null, xLabel = "", yLabel = "" } = {}) {
+export function chart(container, series, { scatter = false, date = true, marker = null, markers = false, xLabel = "", yLabel = "" } = {}) {
   const node = typeof container === "string" ? document.querySelector(container) : container;
   node.replaceChildren();
   series = series.map((s, i) => ({ ...s, color: s.color || palette[i % palette.length], points: s.points.filter(p => finite(p.x) && finite(p.y)) }));
@@ -42,6 +42,7 @@ export function chart(container, series, { scatter = false, date = true, marker 
       for (const p of sampled) svg.append(svgEl("circle", { cx: x(p.x), cy: y(p.y), r: 2.4, fill: s.color, opacity: .5 }));
     } else {
       svg.append(svgEl("path", { d: sampled.map((p, i) => `${i ? "L" : "M"}${x(p.x).toFixed(2)},${y(p.y).toFixed(2)}`).join(" "), fill: "none", stroke: s.color, "stroke-width": 1.8, "stroke-linejoin": "round" }));
+      if (markers) for (const p of sampled) svg.append(svgEl("circle", { cx: x(p.x), cy: y(p.y), r: 3, fill: s.color }));
     }
   }
   if (finite(marker)) svg.append(svgEl("line", { x1: x(marker), x2: x(marker), y1: T, y2: H - B, stroke: "var(--chart-accent, #0099ad)", "stroke-dasharray": "4 4" }));
@@ -70,22 +71,27 @@ export class BasinAtlas {
   constructor(canvas, onSelect) {
     this.canvas = canvas; this.onSelect = onSelect; this.rows = []; this.paths = []; this.selected = new Set();
     canvas.addEventListener("pointermove", e => {
-      if (!this.performance) return;
-      const bounds = canvas.getBoundingClientRect(), ctx = canvas.getContext("2d");
-      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
-      const hit = [...this.paths].reverse().find(({ path }) => ctx.isPointInPath(path, e.clientX - bounds.left, e.clientY - bounds.top, "evenodd"));
-      ctx.restore();
-      canvas.title = hit ? `${hit.row.basin_id} · ${hit.row.name || ""}: ${this.performance.get(hit.row.basin_id)?.label || "No score"}` : "";
+      const hit = this.hitTest(e);
+      canvas.title = hit ? `${hit.row.basin_id} · ${hit.row.name || ""}`
+        + (this.performance ? `: ${this.performance.get(hit.row.basin_id)?.label || "No score"}` : "") : "";
     });
     this.resize = new ResizeObserver(() => this.draw()); this.resize.observe(canvas);
     canvas.addEventListener("click", e => {
-      const bounds = canvas.getBoundingClientRect(), ctx = canvas.getContext("2d");
-      // Paths use CSS pixels; identity transform avoids device-pixel ambiguity in hit tests.
-      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
-      const hit = [...this.paths].reverse().find(({ path }) => ctx.isPointInPath(path, e.clientX - bounds.left, e.clientY - bounds.top, "evenodd"));
-      ctx.restore();
+      const hit = this.hitTest(e);
       if (hit?.row.eligible) this.onSelect(hit.row.basin_id);
     });
+  }
+  hitTest(event) {
+    const bounds = this.canvas.getBoundingClientRect(), ctx = this.canvas.getContext("2d");
+    const x = event.clientX - bounds.left, y = event.clientY - bounds.top;
+    // Small selected catchments have a visible marker with a matching click target.
+    const marker = [...(this.markers || [])].reverse().find(entry => entry.row.eligible && Math.hypot(x - entry.x, y - entry.y) <= 7);
+    if (marker) return marker;
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // Prefer the smallest eligible upstream catchment, regardless of catalog order.
+    const hit = [...this.paths].reverse().find(({ path, row }) => row.eligible && ctx.isPointInPath(path, x, y, "evenodd"));
+    ctx.restore();
+    return hit;
   }
   setPerformance(styles) { this.performance = styles; this.draw(); }
   setData(rows) { this.rows = rows; this.layoutKey = null; this.draw(); }
@@ -103,25 +109,52 @@ export class BasinAtlas {
       const coords = rows.flatMap(row => polygons(row).flat(2));
       this.paths = [];
       this.layoutKey = layoutKey;
-      if (!coords.length) return;
+      if (!coords.length) { this.markers = []; return; }
       let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
       for (const [lon, lat] of coords) { const x = lon * Math.cos(47 * Math.PI / 180); xmin = Math.min(xmin, x); xmax = Math.max(xmax, x); ymin = Math.min(ymin, lat); ymax = Math.max(ymax, lat); }
       const scale = Math.min((width - 55) / (xmax - xmin || 1), (height - 70) / (ymax - ymin || 1));
       const project = ([lon, lat]) => [(width - (xmax - xmin) * scale) / 2 + (lon * Math.cos(47 * Math.PI / 180) - xmin) * scale, (height - (ymax - ymin) * scale) / 2 + (ymax - lat) * scale];
       for (const row of rows) {
         const path = new Path2D();
-        for (const polygon of polygons(row)) for (const ring of polygon) { ring.forEach((point, i) => { const [x, y] = project(point); i ? path.lineTo(x, y) : path.moveTo(x, y); }); path.closePath(); }
-        this.paths.push({ path, row });
+        let area = 0, left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+        for (const polygon of polygons(row)) for (const [ringIndex, ring] of polygon.entries()) {
+          const points = ring.map(project);
+          let ringArea = 0;
+          points.forEach(([x, y], i) => {
+            left = Math.min(left, x); right = Math.max(right, x); top = Math.min(top, y); bottom = Math.max(bottom, y);
+            const next = points[(i + 1) % points.length];
+            ringArea += x * next[1] - next[0] * y;
+            i ? path.lineTo(x, y) : path.moveTo(x, y);
+          });
+          area += (ringIndex ? -1 : 1) * Math.abs(ringArea / 2);
+          path.closePath();
+        }
+        if (Number.isFinite(left)) this.paths.push({ path, row, area, x: (left + right) / 2, y: (top + bottom) / 2 });
       }
+      this.paths.sort((a, b) => b.area - a.area);
     }
     const theme = getComputedStyle(canvas);
     const selectedFill = theme.getPropertyValue("--map-fill").trim() || "#00BFFF";
     const selectedStroke = theme.getPropertyValue("--map-stroke").trim() || "#0099ad";
-    for (const { path, row } of this.paths) {
+    // Background first; overlapping downstream basins must never erase selections.
+    const ordered = [...this.paths.filter(entry => !this.selected.has(entry.row.basin_id)),
+      ...this.paths.filter(entry => this.selected.has(entry.row.basin_id))];
+    for (const { path, row } of ordered) {
       const selected = this.selected.has(row.basin_id);
       ctx.fillStyle = this.performance ? this.performance.get(row.basin_id)?.color || "#d8dde3" : selected ? selectedFill : row.eligible ? "#d8dde3" : "#e1e7ed";
       ctx.strokeStyle = selected ? selectedStroke : "#a8b4c2"; ctx.lineWidth = selected ? (this.performance ? 3 : 1.2) : .65;
       ctx.fill(path, "evenodd"); ctx.stroke(path);
+    }
+    // Outline after all fills so nested selected boundaries remain visible.
+    for (const { path, row } of ordered) if (this.selected.has(row.basin_id)) {
+      ctx.strokeStyle = selectedStroke; ctx.lineWidth = this.performance ? 3 : 1.8; ctx.stroke(path);
+    }
+    this.markers = ordered.filter(entry => this.selected.has(entry.row.basin_id) && entry.area < 80);
+    for (const { x, y, row } of this.markers) {
+      ctx.beginPath(); ctx.arc(x, y, 4.5, 0, 2 * Math.PI);
+      ctx.fillStyle = this.performance ? this.performance.get(row.basin_id)?.color || "#d8dde3" : selectedFill;
+      ctx.strokeStyle = selectedStroke; ctx.lineWidth = 2;
+      ctx.fill(); ctx.stroke();
     }
   }
 }

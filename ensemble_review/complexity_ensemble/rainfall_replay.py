@@ -2,13 +2,38 @@
 
 from __future__ import annotations
 
+import html
+import tempfile
 from dataclasses import dataclass
 from datetime import date, timedelta
-import html
 from pathlib import Path
-import tempfile
+from typing import Protocol, Sequence, TypedDict
 
 from .hydrology_data import HydrologySeries
+
+
+class ReplayPrediction(Protocol):
+    @property
+    def basin_id(self) -> str: ...
+    @property
+    def target_date(self) -> date: ...
+    @property
+    def predicted_mm_day(self) -> float: ...
+
+
+class ForecastSnapshot(TypedDict):
+    target_date: date
+    start_date: date
+    end_date: date
+    rain_total: float
+    pet_total: float
+    temperature_mean: float
+    previous_flow: float
+    previous_flow_kind: str
+    predicted: float
+    observed: float
+    lead_day: int
+    issue_date: date | None
 
 
 @dataclass(frozen=True)
@@ -52,7 +77,7 @@ def illustrative_bucket(
 
 def event_choices(
     series: HydrologySeries,
-    predictions: list[object],
+    predictions: Sequence[ReplayPrediction],
     *,
     context_days: int = 30,
     event_days: int = 14,
@@ -85,7 +110,7 @@ def event_choices(
 
 def make_replay(
     series: HydrologySeries,
-    predictions: list[object],
+    predictions: Sequence[ReplayPrediction],
     start: date | str,
     *,
     context_days: int = 30,
@@ -237,7 +262,7 @@ def replay_figures(replay: Replay, day_number: int):
     return weather, discharge, bucket, forecast_diagram(replay, day_number)
 
 
-def forecast_snapshot(replay: Replay, day_number: int) -> dict[str, object]:
+def forecast_snapshot(replay: Replay, day_number: int) -> ForecastSnapshot:
     """Summarize only the dates available when the target is predicted."""
     count = len(replay.dates) - replay.context_days
     if not 1 <= day_number <= count:

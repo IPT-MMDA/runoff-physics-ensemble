@@ -1,40 +1,40 @@
 """Conservation, symbolic execution, leakage and queued workflow checks."""
 
-from dataclasses import asdict, replace
-from datetime import date, timedelta
 import copy
 import importlib.util
 import json
 import math
-from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
 import zipfile
+from dataclasses import asdict, replace
+from datetime import date, timedelta
+from pathlib import Path
+from unittest.mock import patch
 
 import sympy as sp
 import torch
 
 from complexity_ensemble.hydrology_data import HydrologySeries, load_camels_ch
 from complexity_ensemble.kan_case_study import (
+    BASE_SYMBOLIC_LIBRARY,
+    COMPARISON_MODELS,
+    COMPLEX_SYMBOLIC_LIBRARY,
+    DEFAULT_COMPARISON_MODELS,
     BasinParameters,
     CaseStudyConfig,
     NeuralFlux,
     ReservoirFlux,
     StudyCancelled,
     SymbolicFlux,
+    case_study_hardware,
+    config_from_dict,
     distil_symbolic,
+    kan_discovery_profiles,
     prepare_data,
     run_case_study,
     save_case_study,
     simulate,
-    case_study_hardware,
-    config_from_dict,
-    COMPARISON_MODELS,
-    DEFAULT_COMPARISON_MODELS,
-    kan_discovery_profiles,
-    BASE_SYMBOLIC_LIBRARY,
-    COMPLEX_SYMBOLIC_LIBRARY,
 )
 
 
@@ -168,6 +168,7 @@ class ProcessTests(unittest.TestCase):
 
     def test_unknown_job_kind_fails_before_reading_run_id(self):
         from types import SimpleNamespace
+
         from complexity_ensemble.worker import run_job
 
         store = SimpleNamespace(get=lambda job_id: {"cancel_requested": False})
@@ -507,6 +508,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_authenticated_api_queue_worker_result_and_archive(self):
         from fastapi.testclient import TestClient
+
         from complexity_ensemble.api import create_app
         from complexity_ensemble.application import Application
         from complexity_ensemble.jobs import JobStore

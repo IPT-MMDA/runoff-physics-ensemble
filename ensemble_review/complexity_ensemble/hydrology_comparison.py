@@ -4,27 +4,25 @@ import csv
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import mean, stdev
-from typing import Mapping
+from typing import Mapping, Protocol, Sequence
 
 import torch
 from torch import nn
 
 from .devices import as_double, randn, randperm, resolve_device, seeded_generator
-
 from .hydrology import (
     LearnedHydrologyMorsePotential,
     RoutedHydrologyModel,
     SingleComplexHydrologyModel,
     SingleSimpleHydrologyModel,
 )
-from .hydrology_data import HydrologyData, HydrologySplit
 from .hydrology_complexity import (
-    HydrologyComplexityEstimator,
     MODEL_NAMES,
     SCORE_ROUTING_METHODS,
+    HydrologyComplexityEstimator,
     build_hydrology_complexity_estimator,
 )
-
+from .hydrology_data import HydrologyData, HydrologySplit
 
 DYNAMIC_NOISE_FEATURES = {"precipitation", "temperature", "pet", "previous_discharge"}
 
@@ -458,7 +456,22 @@ def hydrology_comparison_summary(records: list[HydrologyComparisonRecord]) -> st
     return "\n".join(lines)
 
 
-def plot_hydrology_comparison(records: list[HydrologyComparisonRecord], path: str | Path) -> None:
+class ComparisonPlotRecord(Protocol):
+    @property
+    def model(self) -> str: ...
+    @property
+    def training_noise(self) -> float: ...
+    @property
+    def inference_noise(self) -> float: ...
+    @property
+    def country(self) -> str: ...
+    @property
+    def basin(self) -> str: ...
+    @property
+    def complex_expert(self) -> str: ...
+
+
+def plot_hydrology_comparison(records: Sequence[ComparisonPlotRecord], path: str | Path) -> None:
     from .visualization import _finish_figure, _pyplot
 
     model_order = MODEL_NAMES

@@ -8,11 +8,11 @@ from dataclasses import asdict, dataclass, replace
 from datetime import date
 from pathlib import Path
 from statistics import mean, stdev
+from typing import Any
 
 import torch
 
 from .devices import DEVICE_CHOICES, randperm, resolve_device, seeded_generator
-
 from .hydrology import HydrologyRoutedOutput, RoutedHydrologyModel
 from .hydrology_comparison import (
     _add_observation_noise,
@@ -29,7 +29,6 @@ from .hydrology_data import (
     load_ukraine_csv,
     make_hydrology_data,
 )
-
 
 DEFAULT_CAMELS_CH_ROOT = Path("/mnt/c/Users/micro/Downloads/camels_ch/camels_ch")
 VERBOSE = False
@@ -410,7 +409,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _configuration(args: argparse.Namespace) -> dict:
-    result = {}
+    result: dict[str, Any] = {}
     for key, value in vars(args).items():
         if isinstance(value, Path):
             result[key] = str(value)
@@ -442,7 +441,7 @@ def _mean_and_std(values: list[float]) -> tuple[float, float]:
 
 def summarize_basin_results(
     records: list[HydrologyDistillationRecord],
-) -> list[dict[str, object]]:
+) -> list[dict[str, str | int | float]]:
     """Aggregate final metrics across seeds and inference-noise draws per basin."""
     keys = sorted(
         {
@@ -486,7 +485,7 @@ def summarize_basin_results(
             )
             == key
         ]
-        row: dict[str, object] = {
+        row: dict[str, str | int | float] = {
             "country": country,
             "basin": basin,
             "period": period,
@@ -513,12 +512,12 @@ def summarize_basin_results(
     return rows
 
 
-def format_basin_results_table(rows: list[dict[str, object]]) -> str:
+def format_basin_results_table(rows: list[dict[str, str | int | float]]) -> str:
     """Format per-basin aggregates as a compact terminal table."""
     if not rows:
         return "No completed basin results."
 
-    def metric(row: dict[str, object], field: str) -> str:
+    def metric(row: dict[str, str | int | float], field: str) -> str:
         average = float(row[f"{field}_mean"])
         spread = float(row[f"{field}_std"])
         return f"{average:.4f}±{spread:.4f}"
@@ -621,6 +620,7 @@ def main() -> None:
                             ).to(device)
                             started = time.perf_counter()
                             if model_name == "morse":
+                                assert isinstance(model, RoutedHydrologyModel)
                                 report = train_hydrology_distill_to_simple(
                                     model,
                                     data.train,

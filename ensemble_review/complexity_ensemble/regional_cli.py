@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Mapping
 
 from .configuration import config_from_mapping
-from .services import execute_experiment
 from .devices import DEVICE_CHOICES
 from .result_registry import DEFAULT_RESULTS_DIRECTORY, parse_bool, save_run
+from .services import execute_experiment
 
 
 def build_parser() -> argparse.ArgumentParser:

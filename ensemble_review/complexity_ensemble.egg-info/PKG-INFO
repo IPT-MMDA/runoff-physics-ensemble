@@ -19,6 +19,10 @@ Provides-Extra: kan
 Requires-Dist: pykan>=0.2.8; extra == "kan"
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
+Requires-Dist: ruff==0.14.14; extra == "dev"
+Requires-Dist: mypy==1.18.2; extra == "dev"
+Requires-Dist: pandas-stubs==2.2.3.250308; extra == "dev"
+Requires-Dist: types-shapely==2.1.0.20261030; extra == "dev"
 Provides-Extra: api
 Requires-Dist: fastapi<1,>=0.115; extra == "api"
 Requires-Dist: pydantic<3,>=2.9; extra == "api"

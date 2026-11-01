@@ -17,6 +17,10 @@ httpx<1,>=0.27
 
 [dev]
 pytest
+ruff==0.14.14
+mypy==1.18.2
+pandas-stubs==2.2.3.250308
+types-shapely==2.1.0.20261030
 
 [kan]
 pykan>=0.2.8

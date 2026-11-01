@@ -9,8 +9,9 @@ import math
 import struct
 import zipfile
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import torch
@@ -109,7 +110,7 @@ def load_observations(
             + ", ".join(sorted(missing))
         )
     zone = ZoneInfo(day_timezone)
-    rows = {basin: {} for basin in wanted}
+    rows: dict[str, dict[date, float]] = {basin: {} for basin in wanted}
     sources = []
     failures = {}
     for path in sorted((root / "data").glob(f"*/water_observations_*_data_{aggregation}_*.csv.gz")):
@@ -253,7 +254,7 @@ def statistics_index(path):
 
 def load_return_levels(path):
     """Validated explicit import; never infer thresholds from station map records."""
-    levels = {}
+    levels: dict[tuple[str, int], dict[str, Any]] = {}
     with Path(path).open(encoding="utf-8-sig", newline="") as source:
         for row in csv.DictReader(source):
             basin = row["station_id"]

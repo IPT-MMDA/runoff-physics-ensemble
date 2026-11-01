@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime
 from pathlib import Path
-from collections.abc import Mapping
-import math
 
 
 def json_safe(value):

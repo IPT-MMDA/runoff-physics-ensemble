@@ -7,7 +7,6 @@ from complexity_ensemble.hydrology_hard_routing_consolidation_comparison import 
 )
 from examples.compare_learned_morse_hydrology_consolidation import main
 
-
 if __name__ == "__main__":
     main(
         compare_hydrology_models_with_hard_routing_and_consolidation,

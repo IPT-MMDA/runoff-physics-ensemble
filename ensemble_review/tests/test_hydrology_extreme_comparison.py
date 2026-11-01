@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import torch
+from examples.compare_extreme_event_ensembles import build_parser
 
 from complexity_ensemble.hydrology_data import HydrologySeries, make_hydrology_data
 from complexity_ensemble.hydrology_extreme_comparison import (
@@ -15,7 +16,6 @@ from complexity_ensemble.hydrology_extreme_comparison import (
     extreme_metrics,
     save_extreme_ensemble_records,
 )
-from examples.compare_extreme_event_ensembles import build_parser
 
 
 def _synthetic_data():

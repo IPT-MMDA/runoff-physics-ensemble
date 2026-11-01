@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import csv
+import math
 from datetime import date, timedelta
 from functools import lru_cache
-import math
 from pathlib import Path
 
 from .hydrology_data import _parse_date
@@ -42,7 +42,7 @@ def _file_dates(path, mtime_ns, size, kind):
             valid.append(day)
     # Cache contiguous ordinal intervals rather than thousands of date objects
     # for each file in a large catalogue.
-    intervals = []
+    intervals: list[tuple[int, int]] = []
     for day in sorted(valid):
         ordinal = day.toordinal()
         if intervals and ordinal == intervals[-1][1] + 1:
@@ -83,7 +83,8 @@ def planned_usage(row, role, budgets, minimum_source_days, selected_models=None)
         row.get(k, 0)
         for k in ("training_observations", "validation_observations", "test_observations")
     )
-    train_used = validation_used = test_used = 0
+    train_used: int | str = 0
+    validation_used = test_used = 0
     issues = []
     needs_sources = selected_models is None or any(
         m.startswith("kan_") or "_source_" in m or "_mixed_" in m for m in selected_models

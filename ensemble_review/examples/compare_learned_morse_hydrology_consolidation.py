@@ -5,7 +5,11 @@ from pathlib import Path
 import torch
 
 from complexity_ensemble.devices import DEVICE_CHOICES, resolve_device
-
+from complexity_ensemble.hydrology_complexity import (
+    MODEL_NAMES,
+    LyapunovComplexityEstimator,
+    TakensPersistenceEstimator,
+)
 from complexity_ensemble.hydrology_consolidation_comparison import (
     compare_hydrology_models_with_consolidation,
     hydrology_comparison_summary,
@@ -13,18 +17,12 @@ from complexity_ensemble.hydrology_consolidation_comparison import (
     save_hydrology_comparison,
 )
 from complexity_ensemble.hydrology_data import load_camels_ch, load_ukraine_csv, make_hydrology_data
-from complexity_ensemble.hydrology_complexity import (
-    MODEL_NAMES,
-    LyapunovComplexityEstimator,
-    TakensPersistenceEstimator,
-)
 from complexity_ensemble.hydrology_morse_learning import (
     assess_learned_morse,
     calibrate_learned_morse,
     save_calibration_report,
     save_potential_assessment,
 )
-
 
 DEFAULT_CAMELS_CH_ROOT = Path("/mnt/c/Users/micro/Downloads/camels_ch/camels_ch")
 MODEL_CHOICES = MODEL_NAMES

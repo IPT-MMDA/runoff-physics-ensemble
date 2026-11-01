@@ -9,7 +9,6 @@ from typing import Mapping, Sequence
 
 import torch
 
-
 CANONICAL_COLUMNS = {
     "date": "date",
     "discharge": "discharge_mm_day",
@@ -116,7 +115,9 @@ def _load_landcover(root: Path, basin_id: str) -> dict[int, tuple[float, ...]]:
             _finite_float(row, "ice_perc"),
         )
         if all(value is not None for value in values):
-            result[int(row["year"])] = tuple(float(value) / 100.0 for value in values)
+            result[int(row["year"])] = tuple(
+                float(value) / 100.0 for value in values if value is not None
+            )
     return result
 
 
@@ -175,7 +176,7 @@ def load_camels_ch(
             if not allow_missing_discharge:
                 continue
             discharge = float("nan")
-        records.append((day, discharge, [float(value) for value in values]))
+        records.append((day, discharge, [float(value) for value in values if value is not None]))
     return _series_from_records(records, forcing_names, basin_id=basin_id, country="Switzerland")
 
 
@@ -208,7 +209,11 @@ def load_ukraine_csv(
         if discharge is None or discharge < 0.0 or any(value is None for value in values):
             continue
         records.append(
-            (_parse_date(row[names["date"]]), discharge, [float(value) for value in values])
+            (
+                _parse_date(row[names["date"]]),
+                discharge,
+                [float(value) for value in values if value is not None],
+            )
         )
     return _series_from_records(
         records,

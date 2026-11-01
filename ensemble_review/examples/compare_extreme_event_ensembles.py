@@ -13,15 +13,12 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-import torch
-
 DEFAULT_CAMELS_CH_ROOT = Path("/mnt/c/Users/micro/Downloads/camels_ch/camels_ch")
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
 from complexity_ensemble.devices import DEVICE_CHOICES, resolve_device  # noqa: E402
-
 from complexity_ensemble.hydrology_data import (  # noqa: E402
     load_camels_ch,
     load_ukraine_csv,

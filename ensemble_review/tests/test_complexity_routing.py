@@ -1,11 +1,11 @@
 """Routing integration tests using synthetic daily discharge, without CAMELS."""
 
-from dataclasses import asdict, replace
-from datetime import date, timedelta
 import importlib.util
 import tempfile
 import types
 import unittest
+from dataclasses import asdict, replace
+from datetime import date, timedelta
 from unittest.mock import patch
 
 import torch

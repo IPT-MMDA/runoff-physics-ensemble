@@ -1,14 +1,14 @@
-from datetime import date, timedelta
-from dataclasses import replace
 import csv
+from dataclasses import replace
+from datetime import date, timedelta
 
 import pytest
 import torch
 
-from complexity_ensemble.app import BasinMapComponent, DEFAULT_BASINS, _config_from_ui_values
+from complexity_ensemble.app import DEFAULT_BASINS, BasinMapComponent, _config_from_ui_values
 from complexity_ensemble.camels_ch_chem import CAMELSCHChemPressures
-from complexity_ensemble.hydrology_data import HydrologySeries
 from complexity_ensemble.estreams import EStreamsVegetationSnow
+from complexity_ensemble.hydrology_data import HydrologySeries
 from complexity_ensemble.regional import (
     BasinCatalogRecord,
     BasinScopeConfig,

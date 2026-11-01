@@ -12,22 +12,21 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from pathlib import Path
+from typing import TypedDict
 
 import torch
 
 from .devices import randperm, resolve_device, seeded_generator
-
 from .hydrology import HydrologyRoutedOutput, RoutedHydrologyModel
+from .hydrology_comparison import _add_observation_noise
 from .hydrology_consolidation_comparison import train_hydrology_model_with_consolidation
 from .hydrology_data import HydrologyData, HydrologySplit
 from .hydrology_distillation import train_hydrology_distill_to_simple
 from .hydrology_hard_routing_consolidation_comparison import (
     train_hydrology_model_with_hard_routing_and_consolidation,
 )
-from .hydrology_comparison import _add_observation_noise
 from .ood import MahalanobisOODDetector
 from .stacking import fit_convex_stacking_weight
-
 
 ENSEMBLE_APPROACHES = ("soft_routing", "hard_routing", "distillation")
 AVAILABLE_APPROACHES = (
@@ -182,6 +181,7 @@ def _events(labels: torch.Tensor, dates: tuple[date, ...]) -> list[tuple[int, in
         if positive and start is None:
             start = index
         elif positive and not consecutive:
+            assert start is not None
             result.append((start, index - 1))
             start = index
         elif not positive and start is not None:
@@ -212,12 +212,32 @@ def _runoff_metrics(prediction: torch.Tensor, target: torch.Tensor) -> tuple[flo
     return float(nse), float(kge)
 
 
+class ExtremeMetrics(TypedDict):
+    test_days: int
+    observed_extreme_days: int
+    observed_events: int
+    predicted_events: int
+    precision: float
+    recall: float
+    critical_success_index: float
+    false_alarm_ratio: float
+    average_precision: float
+    event_precision: float
+    event_recall: float
+    nse: float
+    kge: float
+    rmse_mm_day: float
+    extreme_rmse_mm_day: float
+    peak_magnitude_mae_mm_day: float
+    peak_timing_mae_days: float
+
+
 def extreme_metrics(
     prediction: torch.Tensor,
     target: torch.Tensor,
     dates: tuple[date, ...],
     threshold: float,
-) -> dict[str, float | int]:
+) -> ExtremeMetrics:
     """Return daily, event-level, and continuous runoff metrics."""
     prediction = prediction.detach().flatten().cpu().double()
     target = target.detach().flatten().cpu().double()

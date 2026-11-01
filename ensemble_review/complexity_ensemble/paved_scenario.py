@@ -10,9 +10,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Sequence
-
-import torch
+from typing import Sequence, TypedDict
 
 from .hydrology_data import HydrologySeries
 from .hydrology_events import basin_event_metrics
@@ -57,10 +55,18 @@ class PavedSiteConfig:
             raise ValueError("paved runoff coefficient must be at least the pervious coefficient")
 
 
+class ScenarioRow(TypedDict):
+    seed: int
+    date: date
+    baseline_mm_day: float
+    scenario_mm_day: float
+    delta_mm_day: float
+
+
 @dataclass(frozen=True)
 class PavedScenarioResult:
     # One row per seed and forecast date; baseline and scenario share the model run.
-    rows: list[dict[str, object]]
+    rows: list[ScenarioRow]
     events: list[dict[str, object]]
     summary: dict[str, object]
 
@@ -122,7 +128,7 @@ def run_paved_site_scenario(
     )
     if missing:
         raise ValueError(f"precipitation is unavailable for predicted day {missing[0]}")
-    rows: list[dict[str, object]] = []
+    rows: list[ScenarioRow] = []
     clipped = 0
     for row in selected:
         delta = daily_delta.get(row.target_date, 0.0)
@@ -172,23 +178,23 @@ def run_paved_site_scenario(
         seed_rows = [row for row in rows if row["seed"] == seed]
         days = [row["date"] for row in seed_rows]
         baseline = [float(row["baseline_mm_day"]) for row in seed_rows]
-        scenario = [float(row["scenario_mm_day"]) for row in seed_rows]
+        scenario_values = [row["scenario_mm_day"] for row in seed_rows]
         events.append(
             {
                 "seed": seed,
                 "event_type": "daily_high_flow",
                 "threshold_mm_day": high_threshold,
                 "baseline_events": sum(value > high_threshold for value in baseline),
-                "scenario_events": sum(value > high_threshold for value in scenario),
+                "scenario_events": sum(value > high_threshold for value in scenario_values),
                 "baseline_event_days": sum(value > high_threshold for value in baseline),
-                "scenario_event_days": sum(value > high_threshold for value in scenario),
+                "scenario_event_days": sum(value > high_threshold for value in scenario_values),
             }
         )
         for kind in event_types:
             metrics = basin_event_metrics(
                 days,
                 baseline,
-                scenario,
+                scenario_values,
                 event_type=kind,
                 high_threshold=high,
                 low_threshold=low,

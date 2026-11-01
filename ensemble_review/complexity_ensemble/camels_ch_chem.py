@@ -13,7 +13,6 @@ import torch
 
 from .hydrology_data import HydrologySeries
 
-
 # Public feature name -> (source group, source column). Land cover is omitted
 # because it duplicates CAMELS-CH's CORINE-derived product. Stream chemistry is
 # kept out of predictors because it is intended to become a target in a

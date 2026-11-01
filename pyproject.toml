@@ -1,0 +1,33 @@
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = ["artifacts", "data"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["complexity_ensemble"]
+
+[tool.ruff.lint.per-file-ignores]
+# This standalone example inserts its source-checkout path before package imports.
+"ensemble_review/examples/test_extreme_events_hydrology.py" = ["E402"]
+
+[tool.mypy]
+# Use the active interpreter so installed dependency stubs match its Python syntax.
+# The CI matrix checks the minimum supported interpreter as well as Python 3.12.
+files = ["ensemble_review/complexity_ensemble"]
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["geopandas.*", "plotly.*", "ripser.*", "kan.*", "fiona.*", "sympy.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["ensemble_review/tests"]
+# Some regression tests import the source-checkout examples as well as the package.
+pythonpath = ["ensemble_review"]

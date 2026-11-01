@@ -1,10 +1,10 @@
 from dataclasses import replace
 from datetime import date, timedelta
-from types import SimpleNamespace
 
 import pytest
 import torch
 
+from complexity_ensemble.hydrology_data import HydrologySeries
 from complexity_ensemble.hydrology_events import basin_event_metrics, regional_event_metrics
 from complexity_ensemble.regional import (
     BasinCatalogRecord,
@@ -22,7 +22,6 @@ from complexity_ensemble.regional import (
     make_regional_hydrology_data,
     run_regional_experiment,
 )
-from complexity_ensemble.hydrology_data import HydrologySeries
 
 
 def test_spell_duration_deficit_and_missing_day_break():

@@ -1,14 +1,14 @@
 """Synthetic BAFU read, contract and verification checks with a tiny CAMELS training regression."""
 
 import csv
-from dataclasses import asdict, replace
-from datetime import date, datetime, timedelta, timezone
 import gzip
 import json
-from pathlib import Path
-from types import SimpleNamespace
 import tempfile
 import unittest
+from dataclasses import replace
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -16,7 +16,6 @@ import torch
 from fastapi.testclient import TestClient
 
 from complexity_ensemble.api import create_app
-from complexity_ensemble.api_models import ExperimentRequest
 from complexity_ensemble.application import Application
 from complexity_ensemble.bafu import (
     basin_compatibility,
@@ -29,23 +28,22 @@ from complexity_ensemble.configuration import config_from_mapping
 from complexity_ensemble.flood_verification import flood_metrics
 from complexity_ensemble.hydrology import (
     RoutedHydrologyModel,
-    HydrologyLSTMExpert,
     hydrology_morse_gradient,
 )
 from complexity_ensemble.hydrology_data import HydrologySeries
 from complexity_ensemble.regional import (
     BasinCatalogRecord,
     CAMELSCHCatalog,
-    PredictionRecord,
     ExperimentResult,
+    PredictionRecord,
     _baseline_predictions,
     _resolved,
     prepare_regional_data,
     write_result_artifacts,
 )
+from complexity_ensemble.serialization import public_config
 from complexity_ensemble.server_settings import DatasetRegistration, ServerSettings
 from complexity_ensemble.services import compare_runs
-from complexity_ensemble.serialization import public_config
 
 
 class BAFUBenchmarks(unittest.TestCase):
@@ -931,7 +929,8 @@ class BAFUBenchmarks(unittest.TestCase):
 
     def test_statistics_zip_is_station_index(self):
         # Build a minimal synthetic DBF without any geospatial dependency.
-        import struct, zipfile
+        import struct
+        import zipfile
 
         fields = [("EDV", 4), ("NAME", 8), ("URL_HQPDF", 32)]
         header = 32 + 32 * len(fields) + 1

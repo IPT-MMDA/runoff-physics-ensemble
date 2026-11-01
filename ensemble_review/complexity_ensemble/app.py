@@ -10,32 +10,23 @@ from datetime import date
 from pathlib import Path
 from typing import Iterable
 
-from .services import (
-    execute_experiment,
-    validate_optional_dataset,
-    compare_runs,
-    replay_episodes,
-    prepare_replay,
-    evaluate_scenario,
-)
-from .devices import DEVICE_CHOICES
 from .camels_ch_chem import (
-    CAMELS_CH_CHEM_DYNAMIC_FEATURES,
     DEFAULT_CAMELS_CH_CHEM_FEATURES,
 )
 from .design import launch_style
 from .design.config_help import config_info
 from .design.dataset_help import dataset_info
+from .devices import DEVICE_CHOICES
 from .estreams import ESTREAMS_DYNAMIC_FEATURES
-from .hyd_responses import HYDResponses, DEFAULT_HYD_RESPONSES_FEATURES
+from .hyd_responses import DEFAULT_HYD_RESPONSES_FEATURES, HYDResponses
 from .hydropower import (
     default_hydropower_path,
     ensure_hydropower_gpkg,
-    load_hydropower_sites,
-    prepare_hydropower_forecast,
     hydropower_map_payload,
     hydropower_table_rows,
+    load_hydropower_sites,
     load_saved_run_predictions,
+    prepare_hydropower_forecast,
 )
 from .paved_scenario import PavedSiteConfig
 from .rainfall_replay import (
@@ -67,7 +58,14 @@ from .result_registry import (
     parse_bool,
     save_run,
 )
-
+from .services import (
+    compare_runs,
+    evaluate_scenario,
+    execute_experiment,
+    prepare_replay,
+    replay_episodes,
+    validate_optional_dataset,
+)
 
 DEFAULT_BASINS = (
     "4009",
@@ -479,7 +477,7 @@ def _config_from_ui_values(
         use_estreams = bool(values[48])
         ui_estreams_root = str(values[49] or "").strip()
         selected_estreams_features = tuple(values[50] or ())
-        resolved_estreams_root = ui_estreams_root if use_estreams else None
+        resolved_estreams_root: str | Path | None = ui_estreams_root if use_estreams else None
     else:
         resolved_estreams_root = estreams_root
         selected_estreams_features = ESTREAMS_DYNAMIC_FEATURES
@@ -487,7 +485,7 @@ def _config_from_ui_values(
         use_chem = bool(values[51])
         ui_chem_root = str(values[52] or "").strip()
         selected_chem_features = tuple(values[53] or ())
-        resolved_chem_root = ui_chem_root if use_chem else None
+        resolved_chem_root: str | Path | None = ui_chem_root if use_chem else None
     else:
         resolved_chem_root = camels_chem_root
         selected_chem_features = DEFAULT_CAMELS_CH_CHEM_FEATURES
@@ -668,7 +666,7 @@ def build_app(
                 value="all_basins",
                 label="Model-training basins",
             )
-            eligibility = gr.Dataframe(
+            gr.Dataframe(
                 headers=["basin_id", "name", "eligible"],
                 value=[[x.basin_id, x.name, x.eligible] for x in catalog.records],
                 interactive=False,
@@ -1514,7 +1512,7 @@ the leaderboard lets you revisit and compare saved runs.
                 raise gr.Error("Select two different saved runs")
             run_a, run_b = by_id[run_a_id], by_id[run_b_id]
             comparison_data = compare_runs(run_a, run_b)
-            table = []
+            table: list[list[object]] = []
             for field, label in FILTER_FIELDS:
                 table.append([label, run_a.value(field), run_b.value(field), ""])
             table.extend(
@@ -1794,9 +1792,9 @@ the leaderboard lets you revisit and compare saved runs.
             rows = [row for row in result.predictions if row.basin_id == basin]
             hydro = go.Figure()
             if rows:
-                by_date = {}
+                by_date: dict[date, tuple[list[float], float]] = {}
                 for row in rows:
-                    by_date.setdefault(row.target_date, [[], row.observed_mm_day])[0].append(
+                    by_date.setdefault(row.target_date, ([], row.observed_mm_day))[0].append(
                         row.predicted_mm_day
                     )
                 days = sorted(by_date)
@@ -1990,7 +1988,7 @@ the leaderboard lets you revisit and compare saved runs.
                 from .hydrology_drought import drought_summary
 
                 metric_value["drought_lead_macro_means"] = drought_summary(result.extreme_events)
-            file_values = (
+            file_values: list[str | None] = (
                 [str(paths[key]) for key in ("predictions", "metrics", "config", "archive")]
                 if paths is not None
                 else [None, None, None, None]

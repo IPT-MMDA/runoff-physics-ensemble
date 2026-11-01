@@ -16,6 +16,9 @@ class MorseRouter(nn.Module):
     the gate itself.
     """
 
+    threshold: torch.Tensor
+    score_scale: torch.Tensor
+
     def __init__(
         self,
         morse_gradient: GradientFunction,
@@ -114,6 +117,9 @@ class LearnedRouter(nn.Module):
 
 class ScoreRouter(nn.Module):
     """Convert externally estimated scalar complexity and confidence into a soft gate."""
+
+    threshold: torch.Tensor
+    score_scale: torch.Tensor
 
     def __init__(
         self,

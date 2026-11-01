@@ -13,7 +13,6 @@ import torch
 
 from .hydrology_data import HydrologySeries
 
-
 _MONTHLY_FILES = {
     "estreams_lai": ("estreams_LAI_monhtly.csv", 1.0),
     "estreams_ndvi": ("estreams_NDVI_monhtly.csv", 1.0),

@@ -7,12 +7,12 @@ Existing hydrological event scoring is deliberately left untouched.
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
-import math
 from statistics import mean
-from typing import Mapping
+from typing import Any, Mapping
 
 DAY = timedelta(days=1)
 VERIFICATION = "drought_one_to_one_overlap_v1"
@@ -238,7 +238,7 @@ def verify_drought(
     minimum_days=1,
 ):
     """Return metric rows and auditable day/event tables, without any training."""
-    groups = defaultdict(lambda: defaultdict(list))
+    groups: dict[str, dict[tuple[int, date], list[Any]]] = defaultdict(lambda: defaultdict(list))
     for prediction in predictions:
         issue = prediction.issue_date or prediction.target_date - DAY
         if prediction.target_date <= issue:

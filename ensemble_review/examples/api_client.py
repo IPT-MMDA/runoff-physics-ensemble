@@ -5,11 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import time
+import uuid
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
-import uuid
 
 
 def main():

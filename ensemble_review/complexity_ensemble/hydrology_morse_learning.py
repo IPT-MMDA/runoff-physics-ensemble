@@ -8,7 +8,6 @@ import torch
 from torch.nn import functional as F
 
 from .devices import randperm, resolve_device, seeded_generator
-
 from .hydrology import (
     LearnedHydrologyMorsePotential,
     SingleComplexHydrologyModel,

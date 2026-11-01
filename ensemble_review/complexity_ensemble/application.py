@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from functools import cached_property
+from pathlib import Path
 
 from .configuration import config_from_mapping
 from .devices import resolve_device
@@ -65,6 +65,7 @@ class Application:
             eligible = set(catalog.eligible_ids)
             if config.benchmark.mode != "none":
                 from dataclasses import replace
+
                 from .bafu import basin_compatibility
 
                 compatibility = basin_compatibility(catalog, registration.bafu_root)
@@ -139,9 +140,9 @@ class Application:
 
     def hydropower_forecast(self, run_id, target_date=None):
         from .hydropower import (
+            hydropower_map_payload,
             load_saved_run_predictions,
             prepare_hydropower_forecast,
-            hydropower_map_payload,
         )
 
         dataset_id = self.dataset_for_run(run_id)

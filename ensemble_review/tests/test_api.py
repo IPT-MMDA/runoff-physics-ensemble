@@ -1,14 +1,13 @@
 """Synthetic-data HTTP and worker parity tests; CAMELS-CH is not required."""
 
-from dataclasses import asdict, replace
-from datetime import date, timedelta
 import io
 import json
-from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
 import zipfile
+from datetime import date, timedelta
+from pathlib import Path
+from unittest.mock import patch
 
 try:
     from fastapi.testclient import TestClient
@@ -373,7 +372,7 @@ class APITests(unittest.TestCase):
         self.assertEqual(result.resolved_config["effective_training_basins"], [])
 
     def test_running_cancellation_keeps_inspectable_partial_run(self):
-        response = self.client.post("/api/v1/experiments", json=payload())
+        self.client.post("/api/v1/experiments", json=payload())
         self.store.acquire_worker("cancel-worker")
         job = self.store.claim("cancel-worker")
 
@@ -412,8 +411,9 @@ class APITests(unittest.TestCase):
 
         if importlib.util.find_spec("gradio") is None:
             self.skipTest("Gradio is not installed")
-        from complexity_ensemble.app import build_app
         import os
+
+        from complexity_ensemble.app import build_app
 
         with patch.dict(os.environ, {"GRADIO_ANALYTICS_ENABLED": "False"}):
             with patch("complexity_ensemble.app.CAMELSCHCatalog", return_value=self.catalog):

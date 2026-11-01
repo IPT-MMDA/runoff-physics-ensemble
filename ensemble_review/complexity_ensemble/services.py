@@ -2,27 +2,26 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
-from pathlib import Path
 import csv
 import re
 import shutil
 import tempfile
+from datetime import date, timedelta
+from pathlib import Path
 
+from .flood_verification import flood_summary
+from .hydrology_drought import drought_summary
+from .paved_scenario import run_paved_site_scenario
+from .rainfall_replay import event_choices, make_replay
 from .regional import (
-    CAMELSCHCatalog,
     DateRange,
     ExperimentResult,
     ExtremeEventConfig,
     PredictionRecord,
     run_regional_experiment,
 )
-from .result_registry import discover_runs, load_run, save_run, run_display_name
-from .rainfall_replay import event_choices, make_replay
-from .paved_scenario import run_paved_site_scenario
+from .result_registry import discover_runs, load_run, run_display_name, save_run
 from .serialization import json_safe, public_config
-from .hydrology_drought import drought_summary
-from .flood_verification import flood_summary
 
 
 def execute_experiment(
@@ -95,7 +94,7 @@ class RunRepository:
 
     def list(self):
         by_id = {}
-        warnings = []
+        warnings: list[str] = []
         for root in (self.directory, self.leaderboard):
             if root is not None:
                 snapshot = discover_runs(root)

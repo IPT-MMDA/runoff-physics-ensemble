@@ -11,7 +11,6 @@ import torch
 
 from .hydrology_data import HydrologySeries, _parse_date, _read_rows
 
-
 CAMELS_CH_STATE_SOURCES = {
     "snow_water_equivalent": ("observation_based", "obs", "swe(mm)"),
     "canopy_interception_storage": (

@@ -14,6 +14,7 @@ import urllib.request
 from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Any, Iterable
 
 WASTA_GPKG_URL = (
     "https://data.geo.admin.ch/ch.bfe.statistik-wasserkraftanlagen/"
@@ -253,6 +254,8 @@ def _mean_predictions(result) -> dict[tuple[str, date], float]:
                 target_date = date.fromisoformat(target_date[:10])
             except ValueError:
                 continue
+        if value is None:
+            continue
         try:
             value = float(value)
         except (TypeError, ValueError):
@@ -315,9 +318,6 @@ def prepare_hydropower_forecast(result, catalog, sites, target_date: str | date 
     Stations outside the available catchment coverage remain unmatched and are
     shown gray rather than being assigned an invented forecast.
     """
-    import geopandas as gpd
-    import pandas as pd
-
     means = _mean_predictions(result)
     available_dates = sorted({day for _, day in means})
     if not available_dates:
@@ -353,19 +353,18 @@ def prepare_hydropower_forecast(result, catalog, sites, target_date: str | date 
             continue
         records_with_bounds.append((record, minx, miny, maxx, maxy))
     out = sites.copy()
-    basin_ids, predicted, previous, deltas, pct_changes, flows, previous_flows = (
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-    )
+    basin_ids: list[str | None] = []
+    predicted: list[float] = []
+    previous: list[float] = []
+    deltas: list[float] = []
+    pct_changes: list[float] = []
+    flows: list[float] = []
+    previous_flows: list[float] = []
     statuses = []
     for _, site in out.iterrows():
         point = site.geometry
-        candidates = []
+        candidates: list[Any] = []
+        candidate_records: Iterable[Any]
         if point is None or point.is_empty:
             candidate_records = ()
         else:
@@ -489,7 +488,6 @@ def hydropower_table_rows(sites) -> list[list[object]]:
     """Compact table for Gradio, sorted by largest absolute flow change."""
     rows = []
     for _, row in sites.iterrows():
-        pct = _json_number(row.get("change_pct"))
         rows.append(
             [
                 str(row.get("_site_name", "Hydropower plant")),

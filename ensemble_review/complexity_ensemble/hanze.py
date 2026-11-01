@@ -7,13 +7,14 @@ used; flash/pluvial events require a different observation and matching model.
 
 from __future__ import annotations
 
-from collections import defaultdict
 import csv
-from dataclasses import dataclass
-from datetime import date, timedelta
 import hashlib
 import math
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
+from typing import Any
 
 from .flood_verification import _events
 
@@ -141,7 +142,7 @@ def match_catalogue_events(observed, predicted):
             if overlap > 0:
                 candidates.append((overlap, j))
         edges.append([j for _, j in sorted(candidates, reverse=True)])
-    assigned = {}
+    assigned: dict[int, int] = {}
 
     def visit(i, seen):
         for j in edges[i]:
@@ -182,14 +183,14 @@ def evaluate(predictions, config, events, regions, provenance=None):
         # while each fixed lead is sampled only once per block. Build one scheduled
         # forecast series per seed. If blocks overlap, use the shortest available
         # lead on each target date; never average forecasts or mix training seeds.
-        scheduled = defaultdict(dict)
+        scheduled: dict[tuple[str, int], dict[date, Any]] = defaultdict(dict)
         for (basin, seed, _), rows in list(groups.items()):
             for row in rows:
                 previous = scheduled[basin, seed].get(row.target_date)
                 if previous is None or row.lead_day < previous.lead_day:
                     scheduled[basin, seed][row.target_date] = row
-        for (basin, seed), rows in scheduled.items():
-            groups[basin, seed, "all"] = list(rows.values())
+        for (basin, seed), scheduled_rows in scheduled.items():
+            groups[basin, seed, "all"] = list(scheduled_rows.values())
     scopes = ["all", *range(1, horizon + 1)] if rolling else [1]
     metrics, details, forecasts = [], [], []
     for basin in targets:

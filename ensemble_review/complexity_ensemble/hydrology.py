@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from functools import partial
-import math
-from typing import Sequence
+from typing import Any, Sequence
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 from .experts import MLPExpert, build_expert
+from .hydrology_complexity import SCORE_ROUTING_METHODS, HydrologyComplexityEstimator
 from .pinnmamba import PINNMamba
-from .hydrology_complexity import HydrologyComplexityEstimator, SCORE_ROUTING_METHODS
 from .routing import LearnedRouter, MorseRouter, ScoreRouter
 
 
@@ -241,7 +241,7 @@ def build_hydrology_complex_expert(
     kind: str,
     sequence_length: int,
     feature_count: int,
-    kwargs: dict[str, object] | None = None,
+    kwargs: dict[str, Any] | None = None,
     static_dim: int = 0,
 ) -> nn.Module:
     kwargs = dict(kwargs or {})
@@ -258,6 +258,8 @@ def build_hydrology_complex_expert(
 
 
 class _HydrologyModelBase(nn.Module):
+    discharge_scale: torch.Tensor
+
     def __init__(self, discharge_scale: float | torch.Tensor, feature_names: Sequence[str]) -> None:
         super().__init__()
         self.feature_names = tuple(feature_names)
@@ -303,8 +305,8 @@ class RoutedHydrologyModel(_HydrologyModelBase):
         routing: str = "morse",
         complexity_percentile: float = 80.0,
         gate_temperature: float = 0.15,
-        simple_kwargs: dict[str, object] | None = None,
-        complex_kwargs: dict[str, object] | None = None,
+        simple_kwargs: dict[str, Any] | None = None,
+        complex_kwargs: dict[str, Any] | None = None,
         learned_morse_potential: LearnedHydrologyMorsePotential | None = None,
         static_dim: int = 0,
         complexity_estimator: HydrologyComplexityEstimator | None = None,
@@ -328,15 +330,14 @@ class RoutedHydrologyModel(_HydrologyModelBase):
         self.complex_expert = build_hydrology_complex_expert(
             complex_kind, sequence_length, feature_count, complex_kwargs, static_dim
         )
+        self.router: MorseRouter | LearnedRouter | ScoreRouter
         if routing == "morse":
             gradient = partial(
                 hydrology_morse_gradient,
                 sequence_length=sequence_length,
                 feature_names=self.feature_names,
             )
-            self.router: MorseRouter | LearnedRouter = MorseRouter(
-                gradient, complexity_percentile, gate_temperature
-            )
+            self.router = MorseRouter(gradient, complexity_percentile, gate_temperature)
         elif routing == "learned":
             self.router = LearnedRouter(
                 flat_dim, target_complex_fraction=1.0 - complexity_percentile / 100.0
@@ -451,7 +452,7 @@ class SingleComplexHydrologyModel(_HydrologyModelBase):
         discharge_scale: float | torch.Tensor,
         *,
         complex_kind: str = "mlp",
-        complex_kwargs: dict[str, object] | None = None,
+        complex_kwargs: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(discharge_scale, feature_names)
         self.complex_expert = build_hydrology_complex_expert(
@@ -489,7 +490,7 @@ class SingleSimpleHydrologyModel(_HydrologyModelBase):
         discharge_scale: float | torch.Tensor,
         *,
         simple_kind: str = "rbf",
-        simple_kwargs: dict[str, object] | None = None,
+        simple_kwargs: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(discharge_scale, feature_names)
         flat_dim = sequence_length * len(feature_names)

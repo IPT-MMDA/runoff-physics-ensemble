@@ -1,34 +1,34 @@
 import csv
+import tempfile
+import unittest
 from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
-import tempfile
-import unittest
 from unittest.mock import patch
 
 import torch
 
+from complexity_ensemble.configuration import config_from_mapping
 from complexity_ensemble.hyd_responses import (
-    HYDResponses,
     HYD_RESPONSES_FEATURES,
     HYD_RESPONSES_SOURCES,
+    HYDResponses,
 )
 from complexity_ensemble.hydrology_data import HydrologySeries
-from complexity_ensemble.configuration import config_from_mapping
 from complexity_ensemble.regional import (
     BasinCatalogRecord,
     BasinScopeConfig,
     CAMELSCHCatalog,
     DateRange,
     DateSplitConfig,
+    ForecastConfig,
     HyperparameterConfig,
     ModelArchitectureConfig,
     RegionalExperimentConfig,
     TrainingStrategyConfig,
-    run_regional_experiment,
-    ForecastConfig,
-    make_regional_hydrology_data,
     _rolling_test_predictions,
+    make_regional_hydrology_data,
+    run_regional_experiment,
 )
 from complexity_ensemble.serialization import json_safe, public_config
 
@@ -208,11 +208,12 @@ class HYDResponsesTests(unittest.TestCase):
         self.assertEqual(len({r.predicted_mm_day for r in original[:3]}), 1)
 
     def test_gradio_selection_and_registered_api_worker(self):
-        from complexity_ensemble.app import build_app, _config_from_ui_values
+        import os
+
         from complexity_ensemble.api_models import ExperimentRequest
+        from complexity_ensemble.app import _config_from_ui_values, build_app
         from complexity_ensemble.application import Application
         from complexity_ensemble.server_settings import DatasetRegistration, ServerSettings
-        import os
 
         catalog = CAMELSCHCatalog(self.root, [BasinCatalogRecord("2011")])
         with patch.dict(os.environ, {"GRADIO_ANALYTICS_ENABLED": "False"}):
@@ -269,6 +270,7 @@ class HYDResponsesTests(unittest.TestCase):
         )
         self.assertTrue(result.predictions)
         from fastapi.testclient import TestClient
+
         from complexity_ensemble.api import create_app
         from complexity_ensemble.jobs import JobStore
         from complexity_ensemble.worker import run_job

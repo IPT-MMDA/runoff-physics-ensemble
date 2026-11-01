@@ -42,7 +42,6 @@ from complexity_ensemble.hydrology_data import (
     make_hydrology_data,
 )
 
-
 DEFAULT_CAMELS_CH_ROOT = Path("/mnt/c/Users/micro/Downloads/camels_ch/camels_ch")
 
 

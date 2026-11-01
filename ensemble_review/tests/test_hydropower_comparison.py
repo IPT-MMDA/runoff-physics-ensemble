@@ -1,10 +1,10 @@
 """Numerical and cohort checks for the daily hydropower case study."""
 
 import csv
+import unittest
 from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 import geopandas as gpd
 from shapely.geometry import Point, box

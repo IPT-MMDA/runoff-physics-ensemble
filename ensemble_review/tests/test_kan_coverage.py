@@ -1,14 +1,15 @@
 """Training-cutoff cohort counts, sparsity, weather gaps and API access."""
 
-from dataclasses import asdict, replace
-from pathlib import Path
 import tempfile
 import unittest
+from dataclasses import asdict, replace
+from pathlib import Path
 from unittest.mock import patch
+
+from test_kan_case_study import small_config, synthetic_series
 
 from complexity_ensemble.kan_coverage import coverage_inventory, planned_usage
 from complexity_ensemble.regional import BasinCatalogRecord, CAMELSCHCatalog
-from test_kan_case_study import small_config, synthetic_series
 
 
 class CoverageTests(unittest.TestCase):
@@ -120,6 +121,7 @@ class CoverageTests(unittest.TestCase):
 
     def test_authenticated_coverage_endpoint_does_not_require_selected_cohorts(self):
         from fastapi.testclient import TestClient
+
         from complexity_ensemble.api import create_app
         from complexity_ensemble.application import Application
         from complexity_ensemble.server_settings import DatasetRegistration, ServerSettings
@@ -160,6 +162,7 @@ class CoverageTests(unittest.TestCase):
 
     def test_native_scan_accepts_empty_cohorts_and_preserves_search_filter(self):
         import gradio as gr
+
         from complexity_ensemble.kan_case_study import CaseStudyConfig
         from complexity_ensemble.kan_case_study_ui import build_case_study_tab
 
@@ -279,6 +282,7 @@ class CoverageTests(unittest.TestCase):
 
     def test_unavailable_device_is_rejected_before_case_study_is_queued(self):
         from fastapi.testclient import TestClient
+
         from complexity_ensemble.api import create_app
         from complexity_ensemble.application import Application
         from complexity_ensemble.server_settings import DatasetRegistration, ServerSettings

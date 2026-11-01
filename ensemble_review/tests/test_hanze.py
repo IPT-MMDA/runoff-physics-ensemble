@@ -1,12 +1,12 @@
 """Independent catalogue matching, spatial assignment and saved-run API integration."""
 
-from dataclasses import replace
-from datetime import date, timedelta
 import csv
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from dataclasses import replace
+from datetime import date, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 from complexity_ensemble.hanze import (
@@ -275,6 +275,7 @@ class HanzeIntegrationTests(unittest.TestCase):
 
     def test_existing_run_api_evaluates_without_training_and_downloads_report(self):
         from fastapi.testclient import TestClient
+
         from complexity_ensemble.api import create_app
         from complexity_ensemble.application import Application
 
@@ -294,7 +295,8 @@ class HanzeIntegrationTests(unittest.TestCase):
             self.assertEqual(download.json(), report)
             self.assertIn("attachment", download.headers["Content-Disposition"])
             self.assertEqual(client.get("/api/v1/runs/missing/hanze").status_code, 404)
-            import io, zipfile
+            import io
+            import zipfile
 
             archive = client.get(f"/api/v1/runs/{saved.run_id}/artifacts/archive")
             self.assertEqual(

@@ -1,13 +1,13 @@
 """Custom workspace hosting, authentication and HTTP job integration."""
 
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 try:
-    import gradio
+    import gradio  # noqa: F401 -- test dependency availability before importing Studio
     from fastapi.testclient import TestClient
 except ImportError:
     raise unittest.SkipTest("Install the api extra and Gradio to test the workspace")

@@ -1,5 +1,4 @@
 from datetime import date
-from types import SimpleNamespace
 
 import geopandas as gpd
 import pytest
@@ -15,8 +14,8 @@ from complexity_ensemble.hydropower import (
 from complexity_ensemble.regional import (
     BasinCatalogRecord,
     CAMELSCHCatalog,
-    PredictionRecord,
     ExperimentResult,
+    PredictionRecord,
 )
 
 
@@ -141,6 +140,7 @@ def test_saved_run_predictions_load_without_training(tmp_path):
 
 def test_hydropower_loader_skips_nonspatial_attribute_tables(tmp_path, monkeypatch):
     import pandas as pd
+
     from complexity_ensemble.hydropower import load_hydropower_sites
 
     source = tmp_path / "mixed.gpkg"
@@ -168,6 +168,7 @@ def test_hydropower_loader_skips_nonspatial_attribute_tables(tmp_path, monkeypat
 
 def test_hydropower_loader_explodes_multipoint_to_renderable_points(tmp_path):
     from shapely.geometry import MultiPoint
+
     from complexity_ensemble.hydropower import load_hydropower_sites
 
     source = tmp_path / "multipoint.gpkg"

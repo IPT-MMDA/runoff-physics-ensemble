@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import date
 import json
 import time
+import uuid
+from datetime import date
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
-import uuid
 
 from .serialization import public_config
 
@@ -63,7 +63,7 @@ class RemoteExecutor:
         return job
 
     def run(self, config, progress=None, cancellation=None):
-        from .regional import ExperimentResult
+        from .regional import ExperimentResult, PredictionRecord
         from .services import _prediction
 
         request = {
@@ -92,7 +92,8 @@ class RemoteExecutor:
             return ExperimentResult([], {}, {}, {}, {}, [], [], resolved, cancelled=True)
         run_id = job["result"]["run_id"]
         run = self.request("GET", f"/runs/{run_id}")
-        rows, offset = [], 0
+        rows: list[PredictionRecord] = []
+        offset = 0
         while True:
             page = self.request(
                 "GET",

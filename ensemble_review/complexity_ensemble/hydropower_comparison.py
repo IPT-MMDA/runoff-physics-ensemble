@@ -257,12 +257,12 @@ def compare_hydropower(
         basin = site.get("basin_id")
         if basin not in mapped_basins:
             basin = None
-        row = day_rows.get(basin)
+        forecast_row = day_rows.get(basin)
         props = {
             "name": site["_site_name"],
             "site_id": site["_site_id"],
             "basin_id": basin,
-            "status": "Paired forecast" if row else "No paired forecast on map date",
+            "status": "Paired forecast" if forecast_row else "No paired forecast on map date",
         }
         for key in (
             "observed",
@@ -274,9 +274,13 @@ def compare_hydropower(
             "cost_a_eur",
             "cost_b_eur",
         ):
-            props[key] = row[key] if row else None
-        props["error_a_m3_s"] = row["a"] - row["observed"] if row else None
-        props["error_b_m3_s"] = row["b"] - row["observed"] if row else None
+            props[key] = forecast_row[key] if forecast_row else None
+        props["error_a_m3_s"] = (
+            forecast_row["a"] - forecast_row["observed"] if forecast_row else None
+        )
+        props["error_b_m3_s"] = (
+            forecast_row["b"] - forecast_row["observed"] if forecast_row else None
+        )
         features.append(
             {"type": "Feature", "geometry": site.geometry.__geo_interface__, "properties": props}
         )

@@ -1,18 +1,19 @@
 """Drought software checks only: no models are trained or experiments launched."""
 
+import csv
+import io
+import json
+import math
+import tempfile
+import unittest
+import zipfile
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-import csv
-import json
-import io
-import math
-import tempfile
 from types import SimpleNamespace
-import unittest
 from unittest.mock import patch
-import zipfile
 
+from complexity_ensemble.configuration import config_from_mapping
 from complexity_ensemble.hydrology_drought import (
     DAY,
     DroughtEvent,
@@ -27,15 +28,14 @@ from complexity_ensemble.regional import (
     BasinScopeConfig,
     DateRange,
     DateSplitConfig,
+    ExperimentResult,
     ExtremeEventConfig,
     ForecastConfig,
     RegionalExperimentConfig,
-    ExperimentResult,
     write_result_artifacts,
 )
-from complexity_ensemble.configuration import config_from_mapping
+from complexity_ensemble.result_registry import load_run, save_run
 from complexity_ensemble.serialization import json_safe
-from complexity_ensemble.result_registry import save_run, load_run
 from complexity_ensemble.services import result_summary
 
 
@@ -183,7 +183,10 @@ class DroughtChecks(unittest.TestCase):
 
     def test_matching_optimizes_total_overlap_then_number_of_pairs(self):
         day = date(2000, 1, 1)
-        event = lambda a, b: DroughtEvent(day + a * DAY, day + b * DAY, b - a + 1, 0, False, False)
+
+        def event(a, b):
+            return DroughtEvent(day + a * DAY, day + b * DAY, b - a + 1, 0, False, False)
+
         self.assertEqual(
             match_events([event(0, 4), event(6, 7)], [event(0, 0), event(2, 7)]), [(0, 0), (1, 1)]
         )
@@ -312,6 +315,7 @@ class DroughtIntegrationChecks(unittest.TestCase):
 
     def test_api_download_and_comparison_include_drought_results_without_jobs(self):
         from fastapi.testclient import TestClient
+
         from complexity_ensemble.api import create_app
         from complexity_ensemble.application import Application
         from complexity_ensemble.server_settings import ServerSettings
@@ -443,7 +447,7 @@ class DroughtIntegrationChecks(unittest.TestCase):
 
     def test_gradio_build_exposes_drought_task_and_controls(self):
         from complexity_ensemble.app import build_app
-        from complexity_ensemble.regional import CAMELSCHCatalog, BasinCatalogRecord
+        from complexity_ensemble.regional import BasinCatalogRecord, CAMELSCHCatalog
 
         catalog = CAMELSCHCatalog(".", [BasinCatalogRecord("a")])
         with (

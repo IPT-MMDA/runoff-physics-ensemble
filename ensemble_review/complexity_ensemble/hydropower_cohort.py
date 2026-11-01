@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 from .hydropower import _basin_area_km2, prepare_hydropower_forecast
 
-
 # Top 50 by assigned plant count (ties by basin ID), using full-resolution
 # catchments and the 183-basin cohort of run 20261021T124615Z-0bae752b7d-dce609.
 # The reference assignment covers 705 plants; these 50 account for 544 of them.

@@ -5,7 +5,6 @@ from typing import Mapping
 import torch
 
 from .devices import randperm, resolve_device, seeded_generator
-
 from .hydrology import (
     HydrologyLosses,
     HydrologyRoutedOutput,

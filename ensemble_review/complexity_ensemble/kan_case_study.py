@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import copy
 import csv
-import io
 import importlib.util
+import io
 import json
 import math
 import tempfile
@@ -17,6 +17,7 @@ import zipfile
 from dataclasses import asdict, dataclass, field, replace
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Any
 
 import torch
 from torch import nn
@@ -262,7 +263,9 @@ class NeuralFlux(nn.Module):
         super().__init__()
         self.net = nn.Sequential(nn.Linear(3, width), nn.Tanh(), nn.Linear(width, 1))
         with torch.no_grad():
-            self.net[-1].bias.fill_(-2.0)
+            output_layer = self.net[-1]
+            assert isinstance(output_layer, nn.Linear) and output_layer.bias is not None
+            output_layer.bias.fill_(-2.0)
 
     def forward(self, x):
         return self.net(x).squeeze(-1)
@@ -674,7 +677,8 @@ def distil_symbolic(
         candidates.append(item)
     if not usable:
         raise ValueError(
-            "No valid symbolic candidate: " + "; ".join(c.get("reason", "") for c in candidates)
+            "No valid symbolic candidate: "
+            + "; ".join(str(c.get("reason", "")) for c in candidates)
         )
     _, selected, index = min(usable, key=lambda item: item[0])
     return selected, {
@@ -829,7 +833,7 @@ def _discover_source_equation(
 
 def kan_discovery_profiles(config):
     """Independent discovery settings; existing variants keep their original pipeline."""
-    profiles = []
+    profiles: list[tuple[str, tuple[str, ...], CaseStudyConfig, tuple[str, ...]]] = []
     standard = tuple(m for m in config.selected_models if m in ("kan_pure", "kan_tuned"))
     if standard:
         profiles.append(("standard", standard, config, BASE_SYMBOLIC_LIBRARY))
@@ -946,8 +950,8 @@ def run_case_study(
         budget_mask,
         comparison_masks,
         fit_comparison,
-        predict_comparison,
         fit_report,
+        predict_comparison,
     )
 
     config.validate()
@@ -1044,7 +1048,7 @@ def run_case_study(
             for method in methods:
                 discoveries[method] = symbolic, discovery, initial
             completed += 1
-        source_fits = {}
+        source_fits: dict[str, Any] = {}
         for scenario_index, plan in enumerate(scenarios, 1):
             masks = {b: budget_mask(data[b], plan[b]) for b in config.target_basins}
             for method in config.selected_models:
@@ -1188,6 +1192,7 @@ def save_case_study(result, folder):
 
 def main():
     import argparse
+
     from .regional import CAMELSCHCatalog
 
     parser = argparse.ArgumentParser(description=__doc__)

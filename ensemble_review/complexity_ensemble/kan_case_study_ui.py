@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 import uuid
+from dataclasses import asdict
 
+from .devices import DEVICE_CHOICES
 from .kan_case_study import (
-    CaseStudyConfig,
     COMPARISON_MODELS,
+    CaseStudyConfig,
     StudyCancelled,
     config_from_dict,
     prepare_data,
@@ -15,13 +16,13 @@ from .kan_case_study import (
     save_case_study,
 )
 from .kan_coverage import coverage_inventory, planned_usage
-from .devices import DEVICE_CHOICES
 
 
 def build_case_study_tab(gr, catalog, choices, output_dir, *, executor=None):
-    from .regional import CancellationToken
     import pandas as pd
     import plotly.express as px
+
+    from .regional import CancellationToken
 
     with gr.Tab("KAN low-data case study"):
         gr.Markdown("""### Symbolic runoff transfer to low-data catchments
@@ -286,7 +287,15 @@ enough observations for the budgets you choose.
                     f"Validation: {ranges['validation']['start']} through {ranges['validation']['end']}. "
                     f"Test: {ranges['test']['start']} through {ranges['test']['end']}. "
                     "Available/used counts are per split and assigned role; test labels are scoring-only.",
-                    coverage_rows(report, values[-2], values[-1], *values[:3], cfg.selected_models),
+                    coverage_rows(
+                        report,
+                        values[-2],
+                        values[-1],
+                        values[0],
+                        values[1],
+                        values[2],
+                        cfg.selected_models,
+                    ),
                     *[gr.update(choices=names) for _ in range(3)],
                 )
             except (ValueError, OSError, RuntimeError) as exc:
@@ -353,7 +362,10 @@ enough observations for the budgets you choose.
             yield token, "Starting case study…", None, None, "", None, None
             try:
                 cfg = config(values)
-                callback = lambda f, message: progress(f, desc=message)
+
+                def callback(f, message):
+                    return progress(f, desc=message)
+
                 if executor:
                     job = executor.request(
                         "POST",

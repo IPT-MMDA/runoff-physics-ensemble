@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import torch
 from torch import nn
@@ -162,7 +163,7 @@ class PINNMambaExpert(nn.Module):
         self,
         sequence_length: int = 7,
         sequence_step: float = 0.01,
-        **model_kwargs: object,
+        **model_kwargs: Any,
     ) -> None:
         super().__init__()
         if sequence_length < 2:

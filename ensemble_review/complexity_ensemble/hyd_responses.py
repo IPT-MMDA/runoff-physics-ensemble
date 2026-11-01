@@ -13,7 +13,6 @@ import torch
 
 from .hydrology_data import HydrologySeries
 
-
 # Public name -> source column, expected units, Switzerland-only spatial support.
 HYD_RESPONSES_SOURCES = {
     **{
@@ -33,6 +32,8 @@ def _identifier(value: str) -> str:
 
 
 def _number(value: str | None) -> float | None:
+    if value is None:
+        return None
     try:
         result = float(value)
     except (ValueError, TypeError):
@@ -137,16 +138,16 @@ class HYDResponses:
             rows = []
             for day in series.dates:
                 values = observations.get(day, (None,) * len(selected))
-                row = [
+                feature_row = [
                     item
                     for value in values
                     for item in (value if value is not None else 0.0, float(value is not None))
                 ]
                 if snow:
-                    row.extend(
+                    feature_row.extend(
                         (overlap / 100 if overlap is not None else 0.0, float(overlap is not None))
                     )
-                rows.append(row)
+                rows.append(feature_row)
             external = torch.tensor(
                 rows, dtype=series.forcings.dtype, device=series.forcings.device
             )

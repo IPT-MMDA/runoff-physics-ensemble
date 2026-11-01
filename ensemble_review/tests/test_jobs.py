@@ -1,9 +1,9 @@
 """Queue contracts also runnable using the standard-library unittest runner."""
 
 import concurrent.futures
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 from complexity_ensemble.jobs import JobStore, QueueConflict
 from complexity_ensemble.serialization import json_safe

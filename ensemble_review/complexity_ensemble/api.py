@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
-from datetime import date, datetime, timezone
 import importlib.util
 import json
 import logging
 import os
-from pathlib import Path
 import secrets
 import tempfile
 import zipfile
+from dataclasses import asdict
+from datetime import date, datetime, timezone
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -23,17 +23,17 @@ from starlette.background import BackgroundTask
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .api_models import (
+    CaseStudyRequest,
     ComparisonRequest,
     ErrorResponse,
     ExperimentRequest,
+    HydropowerComparisonRequest,
     JobResponse,
+    PredictionsResponse,
     ReplayRequest,
-    ScenarioRequest,
     RunResponse,
     RunsResponse,
-    PredictionsResponse,
-    CaseStudyRequest,
-    HydropowerComparisonRequest,
+    ScenarioRequest,
 )
 from .application import Application
 from .devices import DEVICE_CHOICES
@@ -180,6 +180,7 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
     @router.get("/capabilities")
     def capabilities():
         import torch
+
         from .regional import TRAINING_APPROACHES
 
         return {
@@ -295,15 +296,15 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
     @router.get("/ui/bootstrap")
     def ui_bootstrap():
         """Public configuration defaults for the browser, without server paths."""
+        from .benchmarks import BenchmarkConfig
         from .regional import (
-            ModelArchitectureConfig,
-            TrainingStrategyConfig,
-            HyperparameterConfig,
-            PhysicsModelConfig,
             ExtremeEventConfig,
             ForecastConfig,
+            HyperparameterConfig,
+            ModelArchitectureConfig,
+            PhysicsModelConfig,
+            TrainingStrategyConfig,
         )
-        from .benchmarks import BenchmarkConfig
 
         config = {
             name: asdict(cls())
@@ -374,9 +375,9 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
 
     @router.get("/datasets/{dataset_id}/features")
     def features(dataset_id: str):
+        from .camels_ch_chem import CAMELS_CH_CHEM_DYNAMIC_FEATURES
         from .estreams import ESTREAMS_DYNAMIC_FEATURES
         from .hyd_responses import HYD_RESPONSES_FEATURES
-        from .camels_ch_chem import CAMELS_CH_CHEM_DYNAMIC_FEATURES
 
         registration = application.registration(dataset_id)
         catalog = application.catalog(dataset_id)
@@ -413,7 +414,7 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
 
     @router.get("/datasets/{dataset_id}/bafu/statistics")
     def bafu_statistics(dataset_id: str):
-        from .bafu import statistics_index, load_return_levels
+        from .bafu import load_return_levels, statistics_index
 
         registration = application.registration(dataset_id)
         result = (
@@ -499,7 +500,7 @@ def create_app(settings: ServerSettings, *, application=None, store=None):
 
     @router.get("/case-studies/kan/defaults")
     def case_study_defaults():
-        from .kan_case_study import CaseStudyConfig, COMPARISON_MODELS
+        from .kan_case_study import COMPARISON_MODELS, CaseStudyConfig
 
         return {
             "config": asdict(CaseStudyConfig()),

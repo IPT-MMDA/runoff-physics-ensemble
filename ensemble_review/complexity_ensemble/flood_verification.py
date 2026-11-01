@@ -1,24 +1,25 @@
 """Shared flood-event verification; independent of model and data adapters."""
 
-from dataclasses import dataclass
-from datetime import timedelta
 import math
+from dataclasses import dataclass
+from datetime import date, timedelta
+from typing import Any
 
 from .hydrology_drought import match_events
 
 
 @dataclass(frozen=True)
 class FloodEvent:
-    start: object
-    end: object
-    peak_day: object
+    start: date
+    end: date
+    peak_day: date
     peak: float
     censored: bool
 
 
 def _events(rows, field, threshold):
     spells = []
-    current = []
+    current: list[Any] = []
     for index, row in enumerate(rows):
         value = getattr(row, field)
         if current and (
@@ -56,7 +57,7 @@ def flood_metrics(rows, threshold):
     Day-1 forecasts form a continuous verification series. Rolling blocks remain
     separate; complete-peak errors exclude events touching a boundary/gap.
     """
-    groups = {}
+    groups: dict[date | str, list[Any]] = {}
     rolling = any(row.lead_day > 1 for row in rows)
     for row in rows:
         groups.setdefault(row.issue_date if rolling else "one_day", []).append(row)

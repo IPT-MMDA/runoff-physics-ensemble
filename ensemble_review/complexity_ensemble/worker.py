@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import fcntl
 import json
 import logging
 import os
-from pathlib import Path
 import signal
 import threading
 import uuid
+from contextlib import contextmanager
+from pathlib import Path
 
 from .jobs import JobCancellation, JobStore
 from .server_settings import ServerSettings
@@ -39,11 +39,14 @@ def run_job(application, store, job, owner):
     from .paved_scenario import PavedSiteConfig
     from .rainfall_replay import export_gif
     from .serialization import json_safe, public_config
-    from .services import execute_experiment, evaluate_scenario, prepare_replay
+    from .services import evaluate_scenario, execute_experiment, prepare_replay
 
     token = JobCancellation(store, job["id"])
     payload = job["payload"]
-    progress = lambda fraction, message: store.progress(job["id"], owner, fraction, message)
+
+    def progress(fraction, message):
+        return store.progress(job["id"], owner, fraction, message)
+
     if token.cancelled:
         return None
     if job["kind"] not in {"experiment", "kan_case_study", "scenario", "gif"}:
@@ -51,7 +54,7 @@ def run_job(application, store, job, owner):
             f"Unsupported job kind {job['kind']!r}; update and restart the training worker"
         )
     if job["kind"] == "kan_case_study":
-        from .kan_case_study import run_case_study, save_case_study, StudyCancelled
+        from .kan_case_study import StudyCancelled, run_case_study, save_case_study
 
         config = application.case_study_config(payload)
         try:

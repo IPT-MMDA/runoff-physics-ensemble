@@ -1,5 +1,5 @@
-from tempfile import TemporaryDirectory
 import unittest
+from tempfile import TemporaryDirectory
 
 from complexity_ensemble.regional import ExperimentResult
 from complexity_ensemble.result_registry import load_run, run_display_name, save_run

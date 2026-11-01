@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Mapping, Sequence
 
-
 EVENT_TYPES = (
     "high_flow_spell",
     "low_flow_spell",
@@ -34,7 +33,11 @@ def _runs(
     total = 0.0
     previous = None
     for day, flag, amount in zip(dates, active, severity):
-        if start is not None and (not flag or day != previous + timedelta(days=1)):
+        if (
+            start is not None
+            and previous is not None
+            and (not flag or day != previous + timedelta(days=1))
+        ):
             duration = (previous - start).days + 1
             if duration >= minimum_days:
                 events.append(Event(start, previous, duration, total))
@@ -44,7 +47,7 @@ def _runs(
                 start = day
             total += amount
             previous = day
-    if start is not None:
+    if start is not None and previous is not None:
         duration = (previous - start).days + 1
         if duration >= minimum_days:
             events.append(Event(start, previous, duration, total))
@@ -178,16 +181,16 @@ def regional_event_metrics(
                 predicted > threshold if direction == "high" else predicted < threshold
             )
     dates = sorted(day for day in coverage if coverage[day] >= minimum_basins)
-    observed = _runs(
+    observed_events = _runs(
         dates,
         [observed_counts.get(day, 0) >= minimum_basins for day in dates],
         [float(observed_counts.get(day, 0)) for day in dates],
         minimum_days,
     )
-    predicted = _runs(
+    predicted_events = _runs(
         dates,
         [predicted_counts.get(day, 0) >= minimum_basins for day in dates],
         [float(predicted_counts.get(day, 0)) for day in dates],
         minimum_days,
     )
-    return _event_scores(observed, predicted)
+    return _event_scores(observed_events, predicted_events)

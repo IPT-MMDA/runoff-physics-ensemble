@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from datetime import timedelta
 import hashlib
 import json
+from dataclasses import asdict, dataclass
+from datetime import timedelta
 from typing import Literal
 
 from .serialization import json_safe
@@ -157,7 +157,7 @@ def prepare_bafu(config, catalog, relevant, start, end):
     for basin in relevant:
         try:
             predictors[basin] = catalog.load_series(basin, start, end)
-        except (ValueError, FileNotFoundError) as error:
+        except (ValueError, FileNotFoundError):
             failures[basin] = "Predictor series unavailable or invalid"
     provenance["predictor_load_failures"] = failures
     return merge_predictors(observed, predictors), provenance
@@ -194,7 +194,7 @@ def threshold_values(config, series, targets, areas):
         return _thresholds(config.extremes, targets, series, config.dates.train), {
             "source": "training_quantile"
         }
-    from .bafu import load_return_levels, file_digest
+    from .bafu import file_digest, load_return_levels
 
     levels = load_return_levels(config.bafu_return_levels)
     values = {}
@@ -234,6 +234,7 @@ def drought_coverage(config, data, series):
     can be scored. These placeholder forecast scores are never reported.
     """
     from types import SimpleNamespace
+
     from .hydrology_drought import verify_drought
 
     period = config.dates.train.resolved()
@@ -413,9 +414,10 @@ def manifest(config, data, series, provenance):
 
 def preflight(config, catalog, *, skip_unusable=False):
     """Uses the same preparation as execution; never constructs or fits a model."""
-    from .regional import prepare_regional_data, preview_regional_hydrology_data
     from dataclasses import replace
     from types import SimpleNamespace
+
+    from .regional import prepare_regional_data, preview_regional_hydrology_data
 
     audit_config = replace(config, benchmark=replace(config.benchmark, strict_cohort=False))
     _, data, series, provenance = prepare_regional_data(
@@ -475,7 +477,7 @@ def paired_comparison(rows_a, rows_b, *, samples=1000):
     b = {key(r): r for r in rows_b}
     if a.keys() != b.keys() or not a:
         return {"compatible": False, "reason": "Prediction keys differ or are empty"}
-    years = {}
+    years: dict[int, list[float]] = {}
     for k, first in a.items():
         second = b[k]
         values = (

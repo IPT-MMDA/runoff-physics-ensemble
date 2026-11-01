@@ -15,7 +15,6 @@ from typing import Iterable, Mapping
 
 from .regional import ExperimentResult, write_result_artifacts
 
-
 SCHEMA_VERSION = 1
 DEFAULT_RESULTS_DIRECTORY = Path("artifacts/hydrology/run_registry")
 
@@ -256,7 +255,7 @@ def available_values(
 
 
 def leaderboard_rows(runs: Iterable[SavedRun]) -> list[list[object]]:
-    rows = []
+    rows: list[list[object]] = []
     for run in runs:
         metrics = run.aggregate_metrics
         rows.append(

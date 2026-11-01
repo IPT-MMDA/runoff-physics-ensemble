@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import math
+from abc import ABC, abstractmethod
+from typing import Any
 
 import torch
-
 
 ROUTING_METHODS = ("morse", "learned_morse", "learned", "tda", "ph", "takens", "lyapunov")
 MODEL_NAMES = (*ROUTING_METHODS, "single_complex")
@@ -301,7 +301,7 @@ class LyapunovComplexityEstimator(HydrologyComplexityEstimator):
 def build_hydrology_complexity_estimator(
     kind: str,
     feature_names: tuple[str, ...],
-    **kwargs: object,
+    **kwargs: Any,
 ) -> HydrologyComplexityEstimator:
     if "previous_discharge" not in feature_names:
         raise ValueError("previous_discharge is required for dynamical complexity routing")

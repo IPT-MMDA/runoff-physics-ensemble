@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
+
+from matplotlib.figure import Figure
 
 
 def _pyplot():
@@ -14,7 +16,7 @@ def _pyplot():
     return plt
 
 
-def _finish_figure(figure: object, path: str | Path) -> None:
+def _finish_figure(figure: Figure, path: str | Path) -> None:
     plt = _pyplot()
 
     path = Path(path)

@@ -1,8 +1,8 @@
 """The quick-training cohort stays fixed and matches real map assignments."""
 
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 import geopandas as gpd
